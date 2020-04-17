@@ -6,6 +6,9 @@ from scrapy.linkextractors import LinkExtractor
 from datetime import datetime
 import petl as etl
 import re
+import click
+import os.path
+import glob
 
 link_extractor = LinkExtractor()
 
@@ -18,8 +21,6 @@ WEEKDAYS = {
     "lördag": 6,
     "söndag": 7,
 }
-
-
 
 
 def weekday_text_to_int(txt, weekdaynow=None):
@@ -62,13 +63,20 @@ def test_weekday_text_to_int():
     assert output == correct_output
 
 
+def get_firefox_profile_path():
+    home = os.path.expanduser("~/.mozilla/firefox/")
+    return glob.glob(os.path.join(home, "*.default-*"))[0]
+
+
 class ScrapeFailure(Exception):
     def __init__(self, message):
         super().__init__(message)
 
 
 class MySpider(object):
-    def __init__(self, my_firefox_profile):
+    def __init__(self, my_firefox_profile=False):
+        if not my_firefox_profile:
+            my_firefox_profile = get_firefox_profile_path()
         self.profile = webdriver.FirefoxProfile(my_firefox_profile)
         self.driver = webdriver.Firefox(self.profile)
         self.cache = {}
@@ -82,44 +90,6 @@ class MySpider(object):
         result = self.scrape()
         table = etl.fromdicts(result)
         etl.toxlsx(table, path)
-
-
-class HuskSpider(MySpider):
-
-    START_URLS = ["https://beta.husk.kusp.se/"]
-    WAIT_TIME = 1  # sek paus mellan varje webbsida
-
-    def get_info_page_urls(self, starting_url):
-        """Hämtar alla länkar på framsidan som innehåller 'atgarder/' """
-        soup = self.make_soup(starting_url)
-        links = soup.find_all("a")
-        no_search_hits = 0
-        for link in links:
-            if "atgarder/" in link.get("href"):
-                yield link.get("href")
-                no_search_hits += 1
-        if no_search_hits == 0:
-            raise ScrapeFailure(
-                f"Kunde inte hitta några åtgärdslänkar på sidan {soup.title.name}"
-            )
-
-    def get_info_page(self, url):
-        """Hämtar titeln på åtgärds-sidan.
-        Undviker att hämta sidan mer än en gång"""
-        husk_url = f"https://beta.husk.kusp.se/{url}"
-        try:
-            soup = self.cache[husk_url]
-        except KeyError:  # url not in cache
-            soup = self.make_soup(husk_url)
-            self.cache[husk_url] = soup
-            time.sleep(self.WAIT_TIME)  # avoids hammering server
-        yield {"label": soup.h1.string, "datetime": datetime.now().isoformat()}
-
-    def scrape(self):
-        # yield ("url", "info", "ts")
-        for start_url in self.START_URLS:
-            for info_page_url in self.get_info_page_urls(start_url):
-                yield from self.get_info_page(info_page_url)
 
 
 class ApoteksgruppenSpider(MySpider):
@@ -167,6 +137,7 @@ class ApoteksgruppenSpider(MySpider):
                 hours = hours[1:]
             weekday_no = weekday_text_to_int(weekday)
             yield {
+                "chain": "Apoteksgruppen",
                 "url": url,
                 "store_name": store_name,
                 "long": "",
@@ -191,10 +162,8 @@ class ApoteketSpider(MySpider):
 
     START_URLS = ["https://www.apoteket.se/sitemap.xml"]
     WAIT_TIME = 1  # sek paus mellan varje webbsida
-    url_regex = re.compile(
-        r"(https://www.apoteket.se/apotek/(\w+-){2,3}\w+/)"
-    )
-    #https://www.apoteket.se/apotek/apoteket-ekorren-goteborg/
+    url_regex = re.compile(r"(https://www.apoteket.se/apotek/(\w+-){2,3}\w+/)")
+    # https://www.apoteket.se/apotek/apoteket-ekorren-goteborg/
 
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
@@ -206,16 +175,14 @@ class ApoteketSpider(MySpider):
             store_url = self.url_regex.findall(loc.text)
             if store_url:
                 store_url = store_url[0][0]
-                #avoids returning urls to the list of
-                #stores in a particular county
-                #e.g. https://www.apoteket.se/apotek/vastra-gotalands-lan/
+                # avoids returning urls to the list of
+                # stores in a particular county
+                # e.g. https://www.apoteket.se/apotek/vastra-gotalands-lan/
                 if "-lan/" not in store_url and "/ombud-" not in store_url:
                     yield store_url
                 no_search_hits += 1
         if no_search_hits == 0:
-            raise ScrapeFailure(
-                f"Kunde inte hitta några av Apoteket ABs apotekssidor"
-            )
+            raise ScrapeFailure(f"Kunde inte hitta några av Apoteket ABs apotekssidor")
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
@@ -227,14 +194,14 @@ class ApoteketSpider(MySpider):
             time.sleep(self.WAIT_TIME)  # avoids hammering server
         print(f"Hämtar {url}")
 
-        #Store name and address
+        # Store name and address
         store_name, *_ = soup.title.string.strip().split(" - ")
         locatio_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
         store_location = soup.select(locatio_selector)[0].string.strip()
         *street_address, zip_city = store_location.split(",")
         *zipcode, city = zip_city.split()
 
-        #geo-coordinates
+        # geo-coordinates
         # mapimage = soup.select_one(".mapImage-0-2-38")
         # print(mapimage)
         # if mapimage:
@@ -244,13 +211,14 @@ class ApoteketSpider(MySpider):
         # else:
         #     lat,long = "",""
 
-        #opening hours
+        # opening hours
         opening_hours = soup.select("ul.underlined-list li")
         for day in opening_hours:
             weekday = day.select("span.date")[0].string.strip()
             hours = day.select("span.time")[0].string.strip()
             weekday_no = weekday_text_to_int(weekday)
             yield {
+                "chain": "Apoteket AB",
                 "url": url,
                 "store_name": store_name,
                 "long": "",
@@ -275,24 +243,20 @@ class LloydsSpider(MySpider):
 
     START_URLS = ["https://www.lloydsapotek.se/sitemap.xml"]
     WAIT_TIME = 1  # sek paus mellan varje webbsida
-    url_regex = re.compile(
-        r"(https://www.apoteket.se/apotek/(\w+-){2,3}\w+/)"
-    )
-    #https://www.apoteket.se/apotek/apoteket-ekorren-goteborg/
+    url_regex = re.compile(r"(https://www.apoteket.se/apotek/(\w+-){2,3}\w+/)")
+    # https://www.apoteket.se/apotek/apoteket-ekorren-goteborg/
 
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
         print("Apoteket AB: Hämtar sitemap")
         soup = self.make_soup(starting_url, parser="lxml-xml")
         locs = soup.find_all("loc")
-        stores_sitemap = self.make_soup(locs[4], parser="lxml-xml")
+        stores_sitemap = self.make_soup(locs[4].text, parser="lxml-xml")
         store_list = stores_sitemap.select("loc")
         for store in store_list:
             yield store.text
         if not store_list:
-            raise ScrapeFailure(
-                f"Kunde inte hitta några av Lloyds apotekssidor"
-            )
+            raise ScrapeFailure(f"Kunde inte hitta några av Lloyds apotekssidor")
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
@@ -304,44 +268,49 @@ class LloydsSpider(MySpider):
             time.sleep(self.WAIT_TIME)  # avoids hammering server
         print(f"Hämtar {url}")
 
-        #Store name and address
-        #todo: fix this
-        store_name, *_ = soup.title.string.strip().split(" - ")
-        locatio_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
-        store_location = soup.select(locatio_selector)[0].string.strip()
-        *street_address, zip_city = store_location.split(",")
-        *zipcode, city = zip_city.split()
+        # Store name and address
+        # todo: fix this
+        store_name, *_ = soup.title.string.strip().split(" | ")
+        location_selector = ".hidden-xs"
+        store_location = soup.select_one(location_selector)
+        #print(store_location)
+        street_address, zipcode, city = store_location.get_text().split("\xa0")
+        #*zipcode, city = zip_city.split()
 
-        #geo-coordinates
-        #long and lat are in the url
-        #e.g. https://www.lloydsapotek.se/vitusapotek/lase_pos_7350051481598?lat=59.3350037&amp;long=18.064591
-        *_, x = url.split("?")
-        lat, long = re.findall("\d{2}\.\d{1,8}", x)
 
-        #opening hours
-        opening_hours = soup.select("div.col-md-6:nth-child(1) > div:nth-child(2)")
-        """Ordinarie öppettider
-Måndag-Fredag: 09:00-17:00
-Lördag-Söndag: 00:00-00:00
-Avvikande öppettider
-Valborgsmässoaf (30/04): 07:30-19:00
-Första maj (01/05): 11:00-16:00"""
-        for day in opening_hours:
-            weekday = day.select("span.date")[0].string.strip()
-            hours = day.select("span.time")[0].string.strip()
+        # geo-coordinates
+        # long and lat are in the url
+        # e.g. https://www.lloydsapotek.se/vitusapotek/lase_pos_7350051481598?lat=59.3350037&amp;long=18.064591
+        *_, url_params = url.split("?")
+        lat, long,*_ = re.findall("\d{2}\.\d{1,8}", url_params)
+
+        # opening hours
+        opening_hours = soup.select_one("div.col-md-6:nth-child(1) > div:nth-child(2)")
+        # Example
+        # """Ordinarie öppettider
+        # Måndag-Fredag: 09:00-17:00
+        # Lördag-Söndag: 00:00-00:00
+        # Avvikande öppettider
+        # Valborgsmässoaf (30/04): 07:30-19:00
+        # Första maj (01/05): 11:00-16:00"""
+        txt = opening_hours.get_text(";").split(";")
+        rows = [row.strip() for row in txt if ":" in row]
+        for day in rows:
+            weekday, *hours = day.split(":")
             weekday_no = weekday_text_to_int(weekday)
             yield {
+                "chain": "Lloyds Apotek",
                 "url": url,
                 "store_name": store_name,
                 "long": long,
                 "lat": lat,
-                "address": ", ".join(street_address),
-                "zipcode": "".join(zipcode),
+                "address": street_address.strip(),
+                "zipcode": zipcode.strip(),
                 "city": city,
                 "datetime": datetime.now().isoformat(),
                 "weekday": weekday,
                 "weekday_no": weekday_no,
-                "hours": hours,
+                "hours": ":".join(hours).strip(),
             }
 
     def scrape(self):
@@ -350,16 +319,54 @@ Första maj (01/05): 11:00-16:00"""
             for info_page_url in self.get_info_page_urls(start_url):
                 yield from self.get_info_page(info_page_url)
 
+
+@click.group()
+def scraper():
+    pass
+
+
+@scraper.command()
+@click.option(
+    "--output-directory", help="Parent directory for xlsx files", default="output"
+)
+def apoteksgruppen(output_directory):
+    apoteksgruppen = ApoteksgruppenSpider()
+    apoteksgruppen.write_xlsx(
+        os.path.join(
+            output_directory, f"apoteksgruppen_{datetime.now().isoformat()}.xlsx"
+        )
+    )
+
+@scraper.command()
+@click.option(
+    "--output-directory", help="Parent directory for xlsx files", default="output"
+)
+def apoteket(output_directory):
+    apoteket = ApoteketSpider()
+    apoteket.write_xlsx(
+        os.path.join(
+            output_directory, f"apoteket_{datetime.now().isoformat()}.xlsx"
+        )
+    )
+
+@scraper.command()
+@click.option(
+    "--output-directory", help="Parent directory for xlsx files", default="output"
+)
+def lloyds(output_directory):
+    lloyds = LloydsSpider()
+    # url = "https://www.lloydsapotek.se/vitusapotek/lase_pos_7350051480010?lat=59.3700775&long=16.5160475"
+    # for row in lloyds.get_info_page(url):
+    #     print(row)
+    lloyds.write_xlsx(
+        os.path.join(
+            output_directory, f"lloyds_{datetime.now().isoformat()}.xlsx"
+        )
+    )
+
+
 if __name__ == "__main__":
-    # todo lägg till terminalkommandon scrape apoteksgruppen, scrape husk
-    firefox_profile = "/home/mikael/.mozilla/firefox/wptpe5t4.default-1575115592563"
-    #apoteksgruppen = ApoteksgruppenSpider(firefox_profile)
-    #apoteksgruppen.write_xlsx("output/apoteksgruppen.xlsx")
-
-    url ="https://www.apoteket.se/apotek/apoteket-raven-osterbymo/"
-    apoteket = ApoteketSpider(firefox_profile)
-    apoteket.write_xlsx("output/apoteket_ab.xlsx")
-
+    scraper()
 
 
 """
