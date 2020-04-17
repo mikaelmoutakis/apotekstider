@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
 from bs4 import BeautifulSoup
 import time
 from scrapy.linkextractors import LinkExtractor
@@ -9,6 +10,7 @@ import re
 import click
 import os.path
 import glob
+
 
 link_extractor = LinkExtractor()
 
@@ -81,8 +83,11 @@ class MySpider(object):
         self.driver = webdriver.Firefox(self.profile)
         self.cache = {}
 
-    def make_soup(self, url, parser="lxml"):
+    def make_soup(self, url, parser="lxml", wait_condition=False):
+        # self.driver.implicitly_wait(10)
         self.driver.get(url)
+        if wait_condition:
+            WebDriverWait(self.driver,timeout=15).until(wait_condition)
         page_source = self.driver.page_source
         return BeautifulSoup(page_source, parser)
 
@@ -248,7 +253,7 @@ class LloydsSpider(MySpider):
 
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
-        print("Apoteket AB: Hämtar sitemap")
+        print("Lloyds Apotek: Hämtar sitemap")
         soup = self.make_soup(starting_url, parser="lxml-xml")
         locs = soup.find_all("loc")
         stores_sitemap = self.make_soup(locs[4].text, parser="lxml-xml")
@@ -273,16 +278,15 @@ class LloydsSpider(MySpider):
         store_name, *_ = soup.title.string.strip().split(" | ")
         location_selector = ".hidden-xs"
         store_location = soup.select_one(location_selector)
-        #print(store_location)
+        # print(store_location)
         street_address, zipcode, city = store_location.get_text().split("\xa0")
-        #*zipcode, city = zip_city.split()
-
+        # *zipcode, city = zip_city.split()
 
         # geo-coordinates
         # long and lat are in the url
         # e.g. https://www.lloydsapotek.se/vitusapotek/lase_pos_7350051481598?lat=59.3350037&amp;long=18.064591
         *_, url_params = url.split("?")
-        lat, long,*_ = re.findall("\d{2}\.\d{1,8}", url_params)
+        lat, long, *_ = re.findall("\d{2}\.\d{1,8}", url_params)
 
         # opening hours
         opening_hours = soup.select_one("div.col-md-6:nth-child(1) > div:nth-child(2)")
@@ -320,6 +324,83 @@ class LloydsSpider(MySpider):
                 yield from self.get_info_page(info_page_url)
 
 
+class KronansApotekSpider(MySpider):
+
+    START_URLS = ["https://www.kronansapotek.se/sitemap.xml"]
+    WAIT_TIME = 1  # sek paus mellan varje webbsida
+    # url_regex = re.compile(r"(https://www.apoteket.se/apotek/(\w+-){2,3}\w+/)")
+    # https://www.kronansapotek.se/store/Kronans%20Apotek%20Askim%20Hantverksv%C3%A4gen?lat=57.64259&long=11.94938
+
+    def get_info_page_urls(self, starting_url):
+        """Trawls the sitemap for urls that link to individual store pages"""
+        print("Kronans Apotek: Hämtar sitemap")
+        soup = self.make_soup(starting_url, parser="lxml-xml")
+        locs = soup.find_all("loc")
+        print(locs)
+        stores_sitemap = self.make_soup(locs[4].text, parser="lxml-xml")
+        store_list = stores_sitemap.select("loc")
+        for store in store_list:
+            yield store.text
+        if not store_list:
+            raise ScrapeFailure(f"Kunde inte hitta några av Kronans apotekssidor")
+
+    def get_info_page(self, url):
+        """Retrieves the store's opening hours and street address"""
+        try:
+            soup = self.cache[url]
+        except KeyError:  # url not in cache
+            # detail_pane_selector = "#storeDetail > div.detailPane"
+            # soup = self.make_soup(
+            #     url,
+            #     wait_condition=lambda d: d.find_element_by_css_selector(
+            #         detail_pane_selector
+            #     ),
+            # )
+            soup = self.make_soup(url)
+            self.cache[url] = soup
+            time.sleep(self.WAIT_TIME)  # avoids hammering server
+        print(f"Hämtar {url}")
+
+        # Store name and address
+        store_name, *_ = soup.title.string.strip().split(" | ")
+        street_address = soup.find(itemprop="streetAddress").string
+        zip_code = soup.find(itemprop="postalCode").string
+        city = soup.find(itemprop="addressLocality").string
+
+        # geo-coordinates
+        # long and lat are in the url
+        *_, url_params = url.split("?")
+        lat, long, *_ = re.findall("\d{2}\.\d{1,8}", url_params)
+
+        # opening hours
+        opening_hours = soup.select_one(".store-openings")
+        print(opening_hours)
+        days = opening_hours.find_all("dt")
+        opening_hours = opening_hours.find_all("dd")
+        for weekday, hours in zip(days, opening_hours):
+            weekday_no = weekday_text_to_int(weekday.text)
+            yield {
+                "chain": "Kronans Apotek",
+                "url": url,
+                "store_name": store_name,
+                "long": long,
+                "lat": lat,
+                "address": street_address.strip(),
+                "zipcode": zip_code.strip(),
+                "city": city.strip(),
+                "datetime": datetime.now().isoformat(),
+                "weekday": weekday.text.strip(),
+                "weekday_no": weekday_no,
+                "hours": hours.text.strip(),
+            }
+
+    def scrape(self):
+        # yield ("url", "info", "ts")
+        for start_url in self.START_URLS:
+            for info_page_url in self.get_info_page_urls(start_url):
+                yield from self.get_info_page(info_page_url)
+
+
 @click.group()
 def scraper():
     pass
@@ -337,6 +418,7 @@ def apoteksgruppen(output_directory):
         )
     )
 
+
 @scraper.command()
 @click.option(
     "--output-directory", help="Parent directory for xlsx files", default="output"
@@ -344,10 +426,9 @@ def apoteksgruppen(output_directory):
 def apoteket(output_directory):
     apoteket = ApoteketSpider()
     apoteket.write_xlsx(
-        os.path.join(
-            output_directory, f"apoteket_{datetime.now().isoformat()}.xlsx"
-        )
+        os.path.join(output_directory, f"apoteket_{datetime.now().isoformat()}.xlsx")
     )
+
 
 @scraper.command()
 @click.option(
@@ -359,10 +440,22 @@ def lloyds(output_directory):
     # for row in lloyds.get_info_page(url):
     #     print(row)
     lloyds.write_xlsx(
-        os.path.join(
-            output_directory, f"lloyds_{datetime.now().isoformat()}.xlsx"
-        )
+        os.path.join(output_directory, f"lloyds_{datetime.now().isoformat()}.xlsx")
     )
+
+
+@scraper.command()
+@click.option(
+    "--output-directory", help="Parent directory for xlsx files", default="output"
+)
+def kronans(output_directory):
+    kronans = KronansApotekSpider()
+    url = "https://www.kronansapotek.se/store/Kronans%20Apotek%20Alunda?lat=60.06416&long=18.08108"
+    for x in kronans.get_info_page(url):
+        print(x)
+    # kronans.write_xlsx(
+    #     os.path.join(output_directory, f"kronans_{datetime.now().isoformat()}.xlsx")
+    # )
 
 
 if __name__ == "__main__":
