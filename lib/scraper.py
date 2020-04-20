@@ -87,7 +87,7 @@ class MySpider(object):
         # self.driver.implicitly_wait(10)
         self.driver.get(url)
         if wait_condition:
-            WebDriverWait(self.driver,timeout=15).until(wait_condition)
+            WebDriverWait(self.driver, timeout=15).until(wait_condition)
         page_source = self.driver.page_source
         return BeautifulSoup(page_source, parser)
 
@@ -328,16 +328,19 @@ class KronansApotekSpider(MySpider):
 
     START_URLS = ["https://www.kronansapotek.se/sitemap.xml"]
     WAIT_TIME = 1  # sek paus mellan varje webbsida
-    # url_regex = re.compile(r"(https://www.apoteket.se/apotek/(\w+-){2,3}\w+/)")
-    # https://www.kronansapotek.se/store/Kronans%20Apotek%20Askim%20Hantverksv%C3%A4gen?lat=57.64259&long=11.94938
 
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
         print("Kronans Apotek: Hämtar sitemap")
         soup = self.make_soup(starting_url, parser="lxml-xml")
-        locs = soup.find_all("loc")
-        print(locs)
-        stores_sitemap = self.make_soup(locs[4].text, parser="lxml-xml")
+        # there is a bug in either the xml parser or
+        # - more likely - in kronans sitemap index
+        # that makes the parser choke
+        # instead I have to find the links using plain old
+        # regex.
+        links = re.findall("https://www\..*\.xml", soup.text)
+        next_url = links[4]
+        stores_sitemap = self.make_soup(next_url, parser="lxml-xml")
         store_list = stores_sitemap.select("loc")
         for store in store_list:
             yield store.text
@@ -363,39 +366,146 @@ class KronansApotekSpider(MySpider):
 
         # Store name and address
         store_name, *_ = soup.title.string.strip().split(" | ")
-        street_address = soup.find(itemprop="streetAddress").string
-        zip_code = soup.find(itemprop="postalCode").string
-        city = soup.find(itemprop="addressLocality").string
+        street_address = soup.find(itemprop="streetAddress")
+        if street_address:
+            # url is a valid store page
+            street_address = street_address.string
+            zip_code = soup.find(itemprop="postalCode").string
+            city = soup.find(itemprop="addressLocality").string
 
-        # geo-coordinates
-        # long and lat are in the url
-        *_, url_params = url.split("?")
-        lat, long, *_ = re.findall("\d{2}\.\d{1,8}", url_params)
+            # geo-coordinates
+            # long and lat are in the url
+            *_, url_params = url.split("?")
+            lat, long, *_ = re.findall("\d{2}\.\d{1,8}", url_params)
 
-        # opening hours
-        opening_hours = soup.select_one(".store-openings")
-        print(opening_hours)
-        days = opening_hours.find_all("dt")
-        opening_hours = opening_hours.find_all("dd")
-        for weekday, hours in zip(days, opening_hours):
-            weekday_no = weekday_text_to_int(weekday.text)
-            yield {
-                "chain": "Kronans Apotek",
-                "url": url,
-                "store_name": store_name,
-                "long": long,
-                "lat": lat,
-                "address": street_address.strip(),
-                "zipcode": zip_code.strip(),
-                "city": city.strip(),
-                "datetime": datetime.now().isoformat(),
-                "weekday": weekday.text.strip(),
-                "weekday_no": weekday_no,
-                "hours": hours.text.strip(),
-            }
+            # opening hours
+            opening_hours = soup.select_one(".store-openings")
+            # print(opening_hours)
+            days = opening_hours.find_all("dt")
+            opening_hours = opening_hours.find_all("dd")
+            for weekday, hours in zip(days, opening_hours):
+                weekday_no = weekday_text_to_int(weekday.text)
+                yield {
+                    "chain": "Kronans Apotek",
+                    "url": url,
+                    "store_name": store_name,
+                    "long": long,
+                    "lat": lat,
+                    "address": street_address.strip(),
+                    "zipcode": zip_code.strip(),
+                    "city": city.strip(),
+                    "datetime": datetime.now().isoformat(),
+                    "weekday": weekday.text.strip(),
+                    "weekday_no": weekday_no,
+                    "hours": hours.text.strip(),
+                }
 
     def scrape(self):
-        # yield ("url", "info", "ts")
+        for start_url in self.START_URLS:
+            for info_page_url in self.get_info_page_urls(start_url):
+                yield from self.get_info_page(info_page_url)
+
+
+class HjartatSpider(MySpider):
+
+    START_URLS = ["https://www.apotekhjartat.se/sitemapindex.xml"]
+    WAIT_TIME = 1  # sek paus mellan varje webbsida
+    url_regex = re.compile(
+        "https://www\.apotekhjartat\.se/hitta-apotek-hjartat/\w+/apotek_hjartat_.+/"
+    )
+
+    def get_info_page_urls(self, starting_url):
+        """Trawls the sitemap for urls that link to individual store pages"""
+        print("Kronans Apotek: Hämtar sitemap")
+        soup = self.make_soup(starting_url, parser="lxml-xml")
+        # Apoteket Hjartat seems to have temporary blacklist
+        # If you hit any of the sitemap files more than X times per day
+        # you will get a 404.
+        # As a temporary workaround during testing
+        # I have added a cached sitemap file in the temp folder
+        if "Ogiltig adress" not in soup.title.text:
+            locs = soup.find_all("loc")
+            #Their xml is misconfigured. Parsing it as html
+            stores_sitemap = self.make_soup(locs[0].text, parser="lxml")
+            # todo: spara stores_sitemap till hårddisken
+        else:
+            print("Warning: Cannot fetch sitemap")
+            print("Warning: using cached store list")
+            with open("temp/apotek_hjartat_store_list.xml", "r") as f:
+                stores_sitemap = BeautifulSoup(f,parser="lxml")
+        store_list = stores_sitemap.select("loc")
+        no_search_hits = 0
+        #print(stores_sitemap)
+        for loc in store_list:
+            store_url = self.url_regex.findall(loc.text)
+            print(loc.text)
+            if store_url:
+                yield loc.text
+                no_search_hits += 1
+        if no_search_hits == 0:
+            raise ScrapeFailure(
+                f"Kunde inte hitta några av Apoteket Hjärtats butikssidor"
+            )
+
+    def get_info_page(self, url):
+        """Retrieves the store's opening hours and street address"""
+        try:
+            soup = self.cache[url]
+        except KeyError:  # url not in cache
+            detail_pane_selector = "div.pharmacyMap a"
+            soup = self.make_soup(
+                url,
+                wait_condition=lambda d: d.find_element_by_css_selector(
+                    detail_pane_selector
+                ),
+            )
+            self.cache[url] = soup
+            time.sleep(self.WAIT_TIME)  # avoids hammering server
+        print(f"Hämtar {url}")
+        info_box = soup.find(id="findPharmacyContentHolder2")
+        if info_box:
+
+            # Store name and address
+            *_, store_name = soup.title.string.strip().split(" vid ")
+
+            # postal adress
+            adr = soup.select_one(
+                "#findPharmacyContentHolder2 > div:nth-child(2) > p:nth-child(2)"
+            )
+            zip_code, city, *street_address = adr.text.strip().split("\n")
+
+            # geo-coordinates
+            map_link = soup.select_one("div.pharmacyMap a")
+            if map_link:
+                lat, long = re.findall(
+                    "ll=(\d{2}\.\d{1,10}),(\d{2}\.\d{1,10})", map_link["href"]
+                )[0]
+            else:
+                lat, long = "", ""
+
+            # opening hours
+            h = soup.select("span.opening_Hours")
+            d = soup.select("span.day_of_week")
+            opening_hours = [(day.text, hours.text) for day, hours in zip(d, h)]
+
+            for weekday, hours in opening_hours:
+                weekday_no = weekday_text_to_int(weekday)
+                yield {
+                    "chain": "Apoteket Hjärtat",
+                    "url": url,
+                    "store_name": store_name,
+                    "long": long,
+                    "lat": lat,
+                    "address": " ".join(street_address),
+                    "zipcode": zip_code,
+                    "city": city,
+                    "datetime": datetime.now().isoformat(),
+                    "weekday": weekday,
+                    "weekday_no": weekday_no,
+                    "hours": hours,
+                }
+
+    def scrape(self):
         for start_url in self.START_URLS:
             for info_page_url in self.get_info_page_urls(start_url):
                 yield from self.get_info_page(info_page_url)
@@ -426,7 +536,10 @@ def apoteksgruppen(output_directory):
 def apoteket(output_directory):
     apoteket = ApoteketSpider()
     apoteket.write_xlsx(
-        os.path.join(output_directory, f"apoteket_{datetime.now().isoformat()}.xlsx")
+        os.path.join(
+            output_directory,
+            f"apoteket_{datetime.now().isoformat().replace(':','_')}.xlsx",
+        )
     )
 
 
@@ -440,7 +553,10 @@ def lloyds(output_directory):
     # for row in lloyds.get_info_page(url):
     #     print(row)
     lloyds.write_xlsx(
-        os.path.join(output_directory, f"lloyds_{datetime.now().isoformat()}.xlsx")
+        os.path.join(
+            output_directory,
+            f"lloyds_{datetime.now().isoformat().replace(':','_')}.xlsx",
+        )
     )
 
 
@@ -448,63 +564,41 @@ def lloyds(output_directory):
 @click.option(
     "--output-directory", help="Parent directory for xlsx files", default="output"
 )
-def kronans(output_directory):
+@click.option("--store", help="URL for single store")
+def kronans(output_directory, store=False):
     kronans = KronansApotekSpider()
-    url = "https://www.kronansapotek.se/store/Kronans%20Apotek%20Alunda?lat=60.06416&long=18.08108"
-    for x in kronans.get_info_page(url):
-        print(x)
-    # kronans.write_xlsx(
-    #     os.path.join(output_directory, f"kronans_{datetime.now().isoformat()}.xlsx")
-    # )
+    if store:
+        # url = "https://www.kronansapotek.se/store/Kronans%20Apotek%20Alunda?lat=60.06416&long=18.08108"
+        for x in kronans.get_info_page(store):
+            print(x)
+    else:
+        kronans.write_xlsx(
+            os.path.join(
+                output_directory,
+                f"kronans_{datetime.now().isoformat().replace(':','_')}.xlsx",
+            )
+        )
+
+
+@scraper.command()
+@click.option(
+    "--output-directory", help="Parent directory for xlsx files", default="output"
+)
+@click.option("--store", help="URL for single store")
+def hjartat(output_directory, store=False):
+    hjartat = HjartatSpider()
+    if store:
+        # url = "https://www.apotekhjartat.se/hitta-apotek-hjartat/skane/apotek_hjartat_drottninggatan_31_landskrona/"
+        for x in hjartat.get_info_page(store):
+            print(x)
+    else:
+        hjartat.write_xlsx(
+            os.path.join(
+                output_directory,
+                f"hjartat_{datetime.now().isoformat().replace(':','_')}.xlsx",
+            )
+        )
 
 
 if __name__ == "__main__":
     scraper()
-
-
-"""
-Lloyds apotek
-from selenium import webdriver
-driver = webdriver.Firefox(profile)
->>> url = "https://www.lloydsapotek.se/apotek"
->>> driver.get(url)
->>> sökruta = driver.find_element_by_id("storelocator-query")
->>> sökknapp = driver.find_element_by_css_selector(".hidden-xs")
->>> sökruta.send_keys("Blekinge")
->>> sökknapp.click()
->>> länkar_till_apotek = driver.find_elements_by_link_text("Klicka här för mer information och avvikande öppettider")
->>> sida1 = länkar_till_apotek[0]
->>> sida1.get_attribute("href")
-
-På enskild sida
-
->>> url = länkar_till_apotek[0].get_attribute("href")
-'https://www.lloydsapotek.se/apotek/LloydsApotek_Lyckeby_Amiralen'
->>> driver.get(url)
->>> koordinater = driver.find_element_by_id("map_canvas")
->>> koordinater.get_attribute("data-latitude")
-'56.1968778'
->>> koordinater.get_attribute("data-longitude")
-'15.6419632'
-
-"""
-
-"""
-from selenium import webdriver
-driver = webdriver.Firefox()
-url = "https://www.kronansapotek.se/store-finder"
-driver.get(url)
-sökruta = driver.find_element_by_id("gps-search")
-sökruta.send_keys(" ")
-
-sökknapp = driver.find_element_by_css_selector(".button")
-sökknapp.click()
-listflik = driver.find_element_by_css_selector("li:nth-child(2) > label")
-listflik.click()
-
-fler_apotek_knapp = driver.find_element_by_css_selector("div:nth-child(2) > .button")
-for x in range(40): fler_apotek_knapp.click()
-
-for x in range(1,10): driver.find_element_by_css_selector(f"li:nth-child({x}) .button-link").click()
-
-"""
