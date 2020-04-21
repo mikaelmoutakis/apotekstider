@@ -1,6 +1,5 @@
 # apotekstider
-A set of python scripts for scraping the opening hours off  
-the Swedish Pharmacy Chains websites.
+A set of python scripts for scraping the opening hours off the Swedish Pharmacy Chains websites.
 
 ## Requirements
 
@@ -15,18 +14,14 @@ the Swedish Pharmacy Chains websites.
     * petl
 
 ## Installation
-Install the required modules and applications. Please see the  
-documentation for how to install each of them on your
+Install the required modules and applications. Please see the documentation for how to install each of them on your
 operating system.
 
 ###  Set Firefox to block all requests for your location.
 Some of the
 pharmacy websites will not load unless you explicitly accept or reject
-requests for location.
-Go to preferences and "Privacy & Security".  
-Under the section for "Permissions", press
-the settings button for "Location".  
-Mark the checkbox for
+requests for location. Go to preferences and "Privacy & Security". Under the section for "Permissions", press
+the settings button for "Location". Mark the checkbox for
 "block new requests asking to access your location".  
 
 
@@ -41,8 +36,7 @@ Microsoft Excel document in "output" run:
 
     ./lib/scraper apoteket
 
-The file is saved in the "output" directory.  
-If you want to save the file to another directory, run
+The file is saved in the "output" directory. If you want to save the file to another directory, run
 
     ./lib/scraper apoteket --output-directory="/path/to/directory"
 
