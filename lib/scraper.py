@@ -3,33 +3,33 @@ from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from bs4 import BeautifulSoup
 import time
-from scrapy.linkextractors import LinkExtractor
 from datetime import datetime
 import petl as etl
 import re
 import click
-import os.path
+import os,os.path
 import glob
+import shelve
 
-
-link_extractor = LinkExtractor()
 
 WEEKDAYS = {
-    "måndag": 1,
-    "tisdag": 2,
-    "onsdag": 3,
-    "torsdag": 4,
-    "fredag": 5,
-    "lördag": 6,
-    "söndag": 7,
+    "måndag": "1",
+    "tisdag": "2",
+    "onsdag": "3",
+    "torsdag": "4",
+    "fredag": "5",
+    "lördag": "6",
+    "söndag": "7",
+    "mån-fre": "1,2,3,4,5",
 }
 
 
 def weekday_text_to_int(txt, weekdaynow=None):
-    """Returnerar 1 för måndag, 2 för tisdag,etc"""
+    """Returns 1 for Monday, 2 for Tuesday etc"""
     # todo: fixa funktion för "måndag - fredag" mm
     # todo: fixa funktion för "Lördag (idag)".
     if weekdaynow is None:
+        # weekdaynow=X is used for testing
         weekdaynow = datetime.now().isoweekday()
     if weekdaynow > 7:
         return None
@@ -38,9 +38,9 @@ def weekday_text_to_int(txt, weekdaynow=None):
         return weekdaynow
     elif "imorgon" in txt:
         if weekdaynow == 7:
-            return 1
+            return "1"
         else:
-            return weekdaynow + 1
+            return f"{weekdaynow + 1}"
     elif txt in WEEKDAYS:
         return WEEKDAYS[txt]
     else:
@@ -76,62 +76,81 @@ class ScrapeFailure(Exception):
 
 
 class MySpider(object):
+    WAIT_TIME = 1  # sec paus between each url
+
     def __init__(self, my_firefox_profile=False):
         if not my_firefox_profile:
             my_firefox_profile = get_firefox_profile_path()
         self.profile = webdriver.FirefoxProfile(my_firefox_profile)
         self.driver = webdriver.Firefox(self.profile)
-        self.cache = {}
+        # todo: remove old cache files automatically
+        if not os.path.isdir("cache"):
+            os.mkdir("cache")
+        self.cache = shelve.open(f"cache/{self.__class__.__name__}.pickle")
+
 
     def make_soup(self, url, parser="lxml", wait_condition=False):
-        # self.driver.implicitly_wait(10)
-        self.driver.get(url)
-        if wait_condition:
-            WebDriverWait(self.driver, timeout=15).until(wait_condition)
-        page_source = self.driver.page_source
+        try:
+            # test if page source is already in the cache file
+            page_source = self.cache[url]
+            print(f"From cache: {url}")
+        except KeyError:
+            # url not in cache
+            self.driver.get(url)  # wait condition efter get?
+            # waiting for a particular element of the page to load
+            # before returning the whole page
+            if wait_condition:
+                WebDriverWait(self.driver, timeout=15).until(wait_condition)
+            print(f"From net: {url}")
+            page_source = self.driver.page_source
+            # add page source to cache
+            self.cache[url] = page_source
+            self.cache.sync()  # saves cache
+            # cache is also saved when scraping
+            # is finished with write_xlsx
+            # avoid hammering the server
+            time.sleep(self.WAIT_TIME)
         return BeautifulSoup(page_source, parser)
+
+    def write_cache(self):
+        self.cache.close()
 
     def write_xlsx(self, path):
         result = self.scrape()
         table = etl.fromdicts(result)
         etl.toxlsx(table, path)
+        self.write_cache()
 
 
 class ApoteksgruppenSpider(MySpider):
 
     START_URLS = ["https://www.apoteksgruppen.se/sitemap.xml?type=1"]
-    WAIT_TIME = 1  # sek paus mellan varje webbsida
+
     url_regex = re.compile(
         r"(https://www.apoteksgruppen.se/apotek/\w+/(\w+-){1,3}\w+/)"
     )
 
     def get_info_page_urls(self, starting_url):
-        """Hämtar alla länkar på framsidan som innehåller 'atgarder/' """
+        """Trawls the sitemap for urls that link to individual store pages"""
         # apoteksgruppens sitemap
-        print("Apoteksgruppen: Hämtar sitemap")
+        print("Apoteksgruppen: Retrieves sitemap")
         soup = self.make_soup(starting_url, parser="lxml-xml")
         locs = soup.find_all("loc")
         no_search_hits = 0
         for loc in locs:
+            # yields the urls that match urls for stores
             store_url = self.url_regex.findall(loc.text)
             if store_url:
                 yield store_url[0][0]
                 no_search_hits += 1
         if no_search_hits == 0:
             raise ScrapeFailure(
-                f"Kunde inte hitta några av apoteksgruppens apotekssidor"
+                f"Could not find any of apoteksgruppens store pages"
             )
 
     def get_info_page(self, url):
-        """Hämtar titeln på åtgärds-sidan.
-        Undviker att hämta sidan mer än en gång"""
-        try:
-            soup = self.cache[url]
-        except KeyError:  # url not in cache
-            soup = self.make_soup(url)
-            self.cache[url] = soup
-            time.sleep(self.WAIT_TIME)  # avoids hammering server
-        print(f"Hämtar {url}")
+        """Retrieves the store's opening hours and street address"""
+        soup = self.make_soup(url)
         street_address = soup.find(itemprop="streetAddress").string
         city = soup.find(itemprop="addressLocality").string
         opening_hours = soup.select("section.pharmacy-opening-hours li")
@@ -141,6 +160,8 @@ class ApoteksgruppenSpider(MySpider):
             if len(hours) > 3:  # when "idag" is included in the opening hours
                 hours = hours[1:]
             weekday_no = weekday_text_to_int(weekday)
+            # todo: add long and lat
+            # todo: is there not a zip code?
             yield {
                 "chain": "Apoteksgruppen",
                 "url": url,
@@ -157,16 +178,15 @@ class ApoteksgruppenSpider(MySpider):
             }
 
     def scrape(self):
-        # yield ("url", "info", "ts")
         for start_url in self.START_URLS:
             for info_page_url in self.get_info_page_urls(start_url):
                 yield from self.get_info_page(info_page_url)
+        self.cache.close()
 
 
 class ApoteketSpider(MySpider):
 
     START_URLS = ["https://www.apoteket.se/sitemap.xml"]
-    WAIT_TIME = 1  # sek paus mellan varje webbsida
     url_regex = re.compile(r"(https://www.apoteket.se/apotek/(\w+-){2,3}\w+/)")
     # https://www.apoteket.se/apotek/apoteket-ekorren-goteborg/
 
@@ -174,7 +194,7 @@ class ApoteketSpider(MySpider):
         """Trawls the sitemap for urls that link to individual store pages"""
         print("Apoteket AB: Hämtar sitemap")
         soup = self.make_soup(starting_url, parser="lxml-xml")
-        locs = soup.find_all("loc")
+        locs = soup.find_all("loc")  # all urls
         no_search_hits = 0
         for loc in locs:
             store_url = self.url_regex.findall(loc.text)
@@ -187,18 +207,15 @@ class ApoteketSpider(MySpider):
                     yield store_url
                 no_search_hits += 1
         if no_search_hits == 0:
-            raise ScrapeFailure(f"Kunde inte hitta några av Apoteket ABs apotekssidor")
+            raise ScrapeFailure(f"Could not find any of Apoteket ABs store pages")
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
-        try:
-            soup = self.cache[url]
-        except KeyError:  # url not in cache
-            soup = self.make_soup(url)
-            self.cache[url] = soup
-            time.sleep(self.WAIT_TIME)  # avoids hammering server
-        print(f"Hämtar {url}")
-
+        map_selector = ".mapImage-0-2-38"
+        soup = self.make_soup(
+            url, wait_condition=lambda d: d.find_element_by_css_selector(map_selector),
+        )
+        soup = self.make_soup(url)
         # Store name and address
         store_name, *_ = soup.title.string.strip().split(" - ")
         locatio_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
@@ -207,14 +224,15 @@ class ApoteketSpider(MySpider):
         *zipcode, city = zip_city.split()
 
         # geo-coordinates
-        # mapimage = soup.select_one(".mapImage-0-2-38")
-        # print(mapimage)
-        # if mapimage:
-        #     src = mapimage[0]["src"]
-        #     markers = src.split(";")[-2]
-        #     lat,long = re.findall("([0-9]{2}\.[0-9]{1,13})",markers) #eller är det long, lat?
-        # else:
-        #     lat,long = "",""
+        mapimage = soup.select_one(".mapImage-0-2-38")
+        if mapimage:
+            src = mapimage["src"]
+            lat, long, *_ = re.findall(
+                "([0-9]{2}\.[0-9]{1,13})", src
+            )  # eller är det long, lat?
+        else:
+            print(f"No geo-info: {url}")
+            lat, long = "", ""
 
         # opening hours
         opening_hours = soup.select("ul.underlined-list li")
@@ -226,8 +244,8 @@ class ApoteketSpider(MySpider):
                 "chain": "Apoteket AB",
                 "url": url,
                 "store_name": store_name,
-                "long": "",
-                "lat": "",
+                "long": long,
+                "lat": lat,
                 "address": ", ".join(street_address),
                 "zipcode": "".join(zipcode),
                 "city": city,
@@ -238,16 +256,15 @@ class ApoteketSpider(MySpider):
             }
 
     def scrape(self):
-        # yield ("url", "info", "ts")
         for start_url in self.START_URLS:
             for info_page_url in self.get_info_page_urls(start_url):
                 yield from self.get_info_page(info_page_url)
+        self.cache.close()
 
 
 class LloydsSpider(MySpider):
 
     START_URLS = ["https://www.lloydsapotek.se/sitemap.xml"]
-    WAIT_TIME = 1  # sek paus mellan varje webbsida
     url_regex = re.compile(r"(https://www.apoteket.se/apotek/(\w+-){2,3}\w+/)")
     # https://www.apoteket.se/apotek/apoteket-ekorren-goteborg/
 
@@ -261,32 +278,23 @@ class LloydsSpider(MySpider):
         for store in store_list:
             yield store.text
         if not store_list:
-            raise ScrapeFailure(f"Kunde inte hitta några av Lloyds apotekssidor")
+            raise ScrapeFailure(f"Could not find any of Lloyds store pages")
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
-        try:
-            soup = self.cache[url]
-        except KeyError:  # url not in cache
-            soup = self.make_soup(url)
-            self.cache[url] = soup
-            time.sleep(self.WAIT_TIME)  # avoids hammering server
-        print(f"Hämtar {url}")
-
+        soup = self.make_soup(url)
         # Store name and address
         # todo: fix this
         store_name, *_ = soup.title.string.strip().split(" | ")
         location_selector = ".hidden-xs"
         store_location = soup.select_one(location_selector)
-        # print(store_location)
         street_address, zipcode, city = store_location.get_text().split("\xa0")
-        # *zipcode, city = zip_city.split()
 
         # geo-coordinates
         # long and lat are in the url
         # e.g. https://www.lloydsapotek.se/vitusapotek/lase_pos_7350051481598?lat=59.3350037&amp;long=18.064591
         *_, url_params = url.split("?")
-        lat, long, *_ = re.findall("\d{2}\.\d{1,8}", url_params)
+        lat, long, *_ = re.findall("\d{2}\.\d{1,13}", url_params)
 
         # opening hours
         opening_hours = soup.select_one("div.col-md-6:nth-child(1) > div:nth-child(2)")
@@ -322,12 +330,12 @@ class LloydsSpider(MySpider):
         for start_url in self.START_URLS:
             for info_page_url in self.get_info_page_urls(start_url):
                 yield from self.get_info_page(info_page_url)
+        self.cache.close()
 
 
 class KronansApotekSpider(MySpider):
 
     START_URLS = ["https://www.kronansapotek.se/sitemap.xml"]
-    WAIT_TIME = 1  # sek paus mellan varje webbsida
 
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
@@ -345,25 +353,18 @@ class KronansApotekSpider(MySpider):
         for store in store_list:
             yield store.text
         if not store_list:
-            raise ScrapeFailure(f"Kunde inte hitta några av Kronans apotekssidor")
+            raise ScrapeFailure(f"Could not find any of Kronans store pages")
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
-        try:
-            soup = self.cache[url]
-        except KeyError:  # url not in cache
-            # detail_pane_selector = "#storeDetail > div.detailPane"
-            # soup = self.make_soup(
-            #     url,
-            #     wait_condition=lambda d: d.find_element_by_css_selector(
-            #         detail_pane_selector
-            #     ),
-            # )
-            soup = self.make_soup(url)
-            self.cache[url] = soup
-            time.sleep(self.WAIT_TIME)  # avoids hammering server
-        print(f"Hämtar {url}")
-
+        # detail_pane_selector = "#storeDetail > div.detailPane"
+        # soup = self.make_soup(
+        #     url,
+        #     wait_condition=lambda d: d.find_element_by_css_selector(
+        #         detail_pane_selector
+        #     ),
+        # )
+        soup = self.make_soup(url)
         # Store name and address
         store_name, *_ = soup.title.string.strip().split(" | ")
         street_address = soup.find(itemprop="streetAddress")
@@ -404,12 +405,12 @@ class KronansApotekSpider(MySpider):
         for start_url in self.START_URLS:
             for info_page_url in self.get_info_page_urls(start_url):
                 yield from self.get_info_page(info_page_url)
+        self.cache.close()
 
 
 class HjartatSpider(MySpider):
 
     START_URLS = ["https://www.apotekhjartat.se/sitemapindex.xml"]
-    WAIT_TIME = 1  # sek paus mellan varje webbsida
     url_regex = re.compile(
         "https://www\.apotekhjartat\.se/hitta-apotek-hjartat/\w+/apotek_hjartat_.+/"
     )
@@ -421,47 +422,30 @@ class HjartatSpider(MySpider):
         # Apoteket Hjartat seems to have temporary blacklist
         # If you hit any of the sitemap files more than X times per day
         # you will get a 404.
-        # As a temporary workaround during testing
-        # I have added a cached sitemap file in the temp folder
-        if "Ogiltig adress" not in soup.title.text:
-            locs = soup.find_all("loc")
-            #Their xml is misconfigured. Parsing it as html
-            stores_sitemap = self.make_soup(locs[0].text, parser="lxml")
-            # todo: spara stores_sitemap till hårddisken
-        else:
-            print("Warning: Cannot fetch sitemap")
-            print("Warning: using cached store list")
-            with open("temp/apotek_hjartat_store_list.xml", "r") as f:
-                stores_sitemap = BeautifulSoup(f,parser="lxml")
+        locs = soup.find_all("loc")
+        # Their xml is misconfigured. Parsing it as html
+        stores_sitemap = self.make_soup(locs[0].text, parser="lxml")
         store_list = stores_sitemap.select("loc")
         no_search_hits = 0
-        #print(stores_sitemap)
         for loc in store_list:
             store_url = self.url_regex.findall(loc.text)
-            print(loc.text)
             if store_url:
                 yield loc.text
                 no_search_hits += 1
         if no_search_hits == 0:
             raise ScrapeFailure(
-                f"Kunde inte hitta några av Apoteket Hjärtats butikssidor"
+                f"Could not find any of Apoteket Hjärtats butikssidor"
             )
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
-        try:
-            soup = self.cache[url]
-        except KeyError:  # url not in cache
-            detail_pane_selector = "div.pharmacyMap a"
-            soup = self.make_soup(
-                url,
-                wait_condition=lambda d: d.find_element_by_css_selector(
-                    detail_pane_selector
-                ),
-            )
-            self.cache[url] = soup
-            time.sleep(self.WAIT_TIME)  # avoids hammering server
-        print(f"Hämtar {url}")
+        detail_pane_selector = "div.pharmacyMap a"
+        soup = self.make_soup(
+            url,
+            wait_condition=lambda d: d.find_element_by_css_selector(
+                detail_pane_selector
+            ),
+        )
         info_box = soup.find(id="findPharmacyContentHolder2")
         if info_box:
 
@@ -509,7 +493,7 @@ class HjartatSpider(MySpider):
         for start_url in self.START_URLS:
             for info_page_url in self.get_info_page_urls(start_url):
                 yield from self.get_info_page(info_page_url)
-
+        self.cache.close()
 
 @click.group()
 def scraper():
