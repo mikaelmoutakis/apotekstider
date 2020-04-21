@@ -51,6 +51,15 @@ To see your other options run:
     ./lib/scraper --help
 
 
+You  can also use scraper library to test Selenium and BeautifulSoup.
+
+    >>> from lib.scraper import ApoteketSpider
+    >>> test = ApoteketSpider()
+    >>> soup = test.make_soup("https://www.apoteket.se/apotek/apoteket-ekorren-goteborg/")
+    >>> soup.title
+    <title>Apoteket Ekorren, Göteborg - Apoteket</title>
+
+
 ## Known bugs
 * For some pharmacy chains the scraper returns to the same store more than once.
 * Longitude and latitude are not scraped from every pharmacy chain.
