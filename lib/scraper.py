@@ -505,6 +505,8 @@ def scraper():
     "--output-directory", help="Parent directory for xlsx files", default="output"
 )
 def apoteksgruppen(output_directory):
+    if not os.path.isdir(output_directory):
+        os.mkdir(output_directory)
     apoteksgruppen = ApoteksgruppenSpider()
     apoteksgruppen.write_xlsx(
         os.path.join(
@@ -518,6 +520,8 @@ def apoteksgruppen(output_directory):
     "--output-directory", help="Parent directory for xlsx files", default="output"
 )
 def apoteket(output_directory):
+    if not os.path.isdir(output_directory):
+        os.mkdir(output_directory)
     apoteket = ApoteketSpider()
     apoteket.write_xlsx(
         os.path.join(
@@ -532,6 +536,8 @@ def apoteket(output_directory):
     "--output-directory", help="Parent directory for xlsx files", default="output"
 )
 def lloyds(output_directory):
+    if not os.path.isdir(output_directory):
+        os.mkdir(output_directory)
     lloyds = LloydsSpider()
     # url = "https://www.lloydsapotek.se/vitusapotek/lase_pos_7350051480010?lat=59.3700775&long=16.5160475"
     # for row in lloyds.get_info_page(url):
@@ -548,40 +554,32 @@ def lloyds(output_directory):
 @click.option(
     "--output-directory", help="Parent directory for xlsx files", default="output"
 )
-@click.option("--store", help="URL for single store")
 def kronans(output_directory, store=False):
+    if not os.path.isdir(output_directory):
+        os.mkdir(output_directory)
     kronans = KronansApotekSpider()
-    if store:
-        # url = "https://www.kronansapotek.se/store/Kronans%20Apotek%20Alunda?lat=60.06416&long=18.08108"
-        for x in kronans.get_info_page(store):
-            print(x)
-    else:
-        kronans.write_xlsx(
-            os.path.join(
-                output_directory,
-                f"kronans_{datetime.now().isoformat().replace(':','_')}.xlsx",
-            )
+    kronans.write_xlsx(
+        os.path.join(
+            output_directory,
+            f"kronans_{datetime.now().isoformat().replace(':','_')}.xlsx",
         )
+    )
 
 
 @scraper.command()
 @click.option(
     "--output-directory", help="Parent directory for xlsx files", default="output"
 )
-@click.option("--store", help="URL for single store")
 def hjartat(output_directory, store=False):
+    if not os.path.isdir(output_directory):
+        os.mkdir(output_directory)
     hjartat = HjartatSpider()
-    if store:
-        # url = "https://www.apotekhjartat.se/hitta-apotek-hjartat/skane/apotek_hjartat_drottninggatan_31_landskrona/"
-        for x in hjartat.get_info_page(store):
-            print(x)
-    else:
-        hjartat.write_xlsx(
-            os.path.join(
-                output_directory,
-                f"hjartat_{datetime.now().isoformat().replace(':','_')}.xlsx",
-            )
+    hjartat.write_xlsx(
+        os.path.join(
+            output_directory,
+            f"hjartat_{datetime.now().isoformat().replace(':','_')}.xlsx",
         )
+    )
 
 
 if __name__ == "__main__":
