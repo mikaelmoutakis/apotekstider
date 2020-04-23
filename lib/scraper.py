@@ -77,6 +77,7 @@ class ScrapeFailure(Exception):
 
 class MySpider(object):
     WAIT_TIME = 1  # sec paus between each url
+    START_URLS = []
 
     def __init__(self, my_firefox_profile=False):
         if not my_firefox_profile:
@@ -121,6 +122,18 @@ class MySpider(object):
         etl.toxlsx(table, path)
         self.write_cache()
 
+    def get_info_page_urls(self,start_url):
+        pass
+
+    def get_info_page(self,info_page_url):
+        pass
+
+    def scrape(self):
+        for start_url in self.START_URLS:
+            for info_page_url in self.get_info_page_urls(start_url):
+                yield from self.get_info_page(info_page_url)
+        self.cache.close()
+
 
 class ApoteksgruppenSpider(MySpider):
 
@@ -147,6 +160,12 @@ class ApoteksgruppenSpider(MySpider):
             raise ScrapeFailure(
                 f"Could not find any of apoteksgruppens store pages"
             )
+
+    def def_get_map_page(self,street_address,city):
+        """Fetches longitud and latitude from
+        map page"""
+        #todo: implement this
+        pass
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
@@ -177,11 +196,6 @@ class ApoteksgruppenSpider(MySpider):
                 "hours": " ".join(hours),
             }
 
-    def scrape(self):
-        for start_url in self.START_URLS:
-            for info_page_url in self.get_info_page_urls(start_url):
-                yield from self.get_info_page(info_page_url)
-        self.cache.close()
 
 
 class ApoteketSpider(MySpider):
@@ -192,7 +206,7 @@ class ApoteketSpider(MySpider):
 
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
-        print("Apoteket AB: Hämtar sitemap")
+        print("Apoteket AB: Fetching sitemap")
         soup = self.make_soup(starting_url, parser="lxml-xml")
         locs = soup.find_all("loc")  # all urls
         no_search_hits = 0
@@ -255,11 +269,7 @@ class ApoteketSpider(MySpider):
                 "hours": hours,
             }
 
-    def scrape(self):
-        for start_url in self.START_URLS:
-            for info_page_url in self.get_info_page_urls(start_url):
-                yield from self.get_info_page(info_page_url)
-        self.cache.close()
+
 
 
 class LloydsSpider(MySpider):
@@ -325,12 +335,6 @@ class LloydsSpider(MySpider):
                 "hours": ":".join(hours).strip(),
             }
 
-    def scrape(self):
-        # yield ("url", "info", "ts")
-        for start_url in self.START_URLS:
-            for info_page_url in self.get_info_page_urls(start_url):
-                yield from self.get_info_page(info_page_url)
-        self.cache.close()
 
 
 class KronansApotekSpider(MySpider):
@@ -401,11 +405,7 @@ class KronansApotekSpider(MySpider):
                     "hours": hours.text.strip(),
                 }
 
-    def scrape(self):
-        for start_url in self.START_URLS:
-            for info_page_url in self.get_info_page_urls(start_url):
-                yield from self.get_info_page(info_page_url)
-        self.cache.close()
+
 
 
 class HjartatSpider(MySpider):
@@ -489,11 +489,7 @@ class HjartatSpider(MySpider):
                     "hours": hours,
                 }
 
-    def scrape(self):
-        for start_url in self.START_URLS:
-            for info_page_url in self.get_info_page_urls(start_url):
-                yield from self.get_info_page(info_page_url)
-        self.cache.close()
+
 
 @click.group()
 def scraper():
