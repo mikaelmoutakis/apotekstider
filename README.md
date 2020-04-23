@@ -1,5 +1,5 @@
 # apotekstider
-A set of python scripts for scraping the opening hours off the Swedish Pharmacy Chains websites.
+A set of python scripts for scraping the opening hours off the Swedish pharmacy chains websites.
 
 ## Requirements
 
