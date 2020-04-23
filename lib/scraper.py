@@ -7,7 +7,7 @@ from datetime import datetime
 import petl as etl
 import re
 import click
-import os,os.path
+import os, os.path
 import glob
 import shelve
 
@@ -89,7 +89,6 @@ class MySpider(object):
             os.mkdir("cache")
         self.cache = shelve.open(f"cache/{self.__class__.__name__}.pickle")
 
-
     def make_soup(self, url, parser="lxml", wait_condition=False):
         try:
             # test if page source is already in the cache file
@@ -122,10 +121,10 @@ class MySpider(object):
         etl.toxlsx(table, path)
         self.write_cache()
 
-    def get_info_page_urls(self,start_url):
+    def get_info_page_urls(self, start_url):
         pass
 
-    def get_info_page(self,info_page_url):
+    def get_info_page(self, info_page_url):
         pass
 
     def scrape(self):
@@ -157,14 +156,12 @@ class ApoteksgruppenSpider(MySpider):
                 yield store_url[0][0]
                 no_search_hits += 1
         if no_search_hits == 0:
-            raise ScrapeFailure(
-                f"Could not find any of apoteksgruppens store pages"
-            )
+            raise ScrapeFailure(f"Could not find any of apoteksgruppens store pages")
 
-    def def_get_map_page(self,street_address,city):
+    def def_get_map_page(self, street_address, city):
         """Fetches longitud and latitude from
         map page"""
-        #todo: implement this
+        # todo: implement this
         pass
 
     def get_info_page(self, url):
@@ -195,7 +192,6 @@ class ApoteksgruppenSpider(MySpider):
                 "weekday_no": weekday_no,
                 "hours": " ".join(hours),
             }
-
 
 
 class ApoteketSpider(MySpider):
@@ -270,8 +266,6 @@ class ApoteketSpider(MySpider):
             }
 
 
-
-
 class LloydsSpider(MySpider):
 
     START_URLS = ["https://www.lloydsapotek.se/sitemap.xml"]
@@ -334,7 +328,6 @@ class LloydsSpider(MySpider):
                 "weekday_no": weekday_no,
                 "hours": ":".join(hours).strip(),
             }
-
 
 
 class KronansApotekSpider(MySpider):
@@ -406,8 +399,6 @@ class KronansApotekSpider(MySpider):
                 }
 
 
-
-
 class HjartatSpider(MySpider):
 
     START_URLS = ["https://www.apotekhjartat.se/sitemapindex.xml"]
@@ -433,9 +424,7 @@ class HjartatSpider(MySpider):
                 yield loc.text
                 no_search_hits += 1
         if no_search_hits == 0:
-            raise ScrapeFailure(
-                f"Could not find any of Apoteket Hjärtats butikssidor"
-            )
+            raise ScrapeFailure(f"Could not find any of Apoteket Hjärtats butikssidor")
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
@@ -489,6 +478,66 @@ class HjartatSpider(MySpider):
                     "hours": hours,
                 }
 
+
+class SOAFSpider(MySpider):
+    START_URLS = "http://www.soaf.nu/om-oss/medlemsf%C3%B6retag-32426937"
+
+    def get_members_page(self,start_url):
+        soup = self.make_soup(start_url)
+        for nr in range(1000):
+            collection = soup.find(id=f"collection{nr}")
+            if collection and "E-post" in collection.text:
+                rows = [
+                    m.strip() for m in collection.get_text(";").split(";") if len(m) > 2
+                ]
+                (
+                    store_name,
+                    _,
+                    telephone,
+                    _,
+                    email,
+                    _,
+                    street_address,
+                    *zip_city_region,
+                ) = rows
+                if "@" in email:
+                    name, domain = email.split("@")
+                    url = f"https://www.{domain}/"
+                else:
+                    url = ""
+                weekdays = [
+                    "måndag",
+                    "tisdag",
+                    "onsdag",
+                    "torsdag",
+                    "fredag",
+                    "lördag",
+                    "söndag",
+                ]
+                # todo: geocode address
+                if "Kontakt:" not in store_name:
+                    #skips the box with SOAFs contact info
+                    for weekday in weekdays:
+                        weekday_no = weekday_text_to_int(weekday)
+                        zip_code = " "
+                        yield {
+                            "chain": "SOAF",
+                            "url": url,
+                            "store_name": store_name,
+                            "long": "",
+                            "lat": "",
+                            "address": street_address,
+                            "zipcode": zip_code,
+                            "city": ",".join(zip_city_region),
+                            "datetime": datetime.now().isoformat(),
+                            "weekday": weekday,
+                            "weekday_no": weekday_no,
+                            "hours": "",
+                        }
+
+    def scrape(self):
+        for row in self.get_members_page(self.START_URLS):
+            yield row
 
 
 @click.group()
@@ -577,6 +626,20 @@ def hjartat(output_directory, store=False):
         )
     )
 
+@scraper.command()
+@click.option(
+    "--output-directory", help="Parent directory for xlsx files", default="output"
+)
+def soaf(output_directory, store=False):
+    if not os.path.isdir(output_directory):
+        os.mkdir(output_directory)
+    soaf = SOAFSpider()
+    soaf.write_xlsx(
+        os.path.join(
+            output_directory,
+            f"soaf_{datetime.now().isoformat().replace(':','_')}.xlsx",
+        )
+    )
 
 if __name__ == "__main__":
     scraper()
