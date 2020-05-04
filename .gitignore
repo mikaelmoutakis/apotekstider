@@ -3,3 +3,4 @@ geckodriver.log
 .idea
 __pycache__
 *.xlsx
+.secrets

@@ -10,7 +10,7 @@ import click
 import os, os.path
 import glob
 import shelve
-
+import requests
 
 WEEKDAYS = {
     "måndag": "1",
@@ -70,6 +70,7 @@ def get_firefox_profile_path():
     return glob.glob(os.path.join(home, "*.default-*"))[0]
 
 
+
 class ScrapeFailure(Exception):
     def __init__(self, message):
         super().__init__(message)
@@ -78,6 +79,7 @@ class ScrapeFailure(Exception):
 class MySpider(object):
     WAIT_TIME = 1  # sec paus between each url
     START_URLS = []
+    VISITED_PAGES = []
 
     def __init__(self, my_firefox_profile=False):
         if not my_firefox_profile:
@@ -88,29 +90,54 @@ class MySpider(object):
         if not os.path.isdir("cache"):
             os.mkdir("cache")
         self.cache = shelve.open(f"cache/{self.__class__.__name__}.pickle")
+        self.geo_cache = shelve.open("cache/geocache.pickle")
+        #todo: read .secrets
+
+    def address_to_long_lat(self,address_string):
+        # check cache
+        # if not cache
+        try:
+            geo_info = self.geo_cache[address_string]
+        except KeyError:
+            # ask for password
+            # query mapquest
+            # save cache
+            pass
+
+
 
     def make_soup(self, url, parser="lxml", wait_condition=False):
-        try:
-            # test if page source is already in the cache file
-            page_source = self.cache[url]
-            print(f"From cache: {url}")
-        except KeyError:
-            # url not in cache
-            self.driver.get(url)  # wait condition efter get?
-            # waiting for a particular element of the page to load
-            # before returning the whole page
-            if wait_condition:
-                WebDriverWait(self.driver, timeout=15).until(wait_condition)
-            print(f"From net: {url}")
-            page_source = self.driver.page_source
-            # add page source to cache
-            self.cache[url] = page_source
-            self.cache.sync()  # saves cache
-            # cache is also saved when scraping
-            # is finished with write_xlsx
-            # avoid hammering the server
-            time.sleep(self.WAIT_TIME)
-        return BeautifulSoup(page_source, parser)
+        #todo: kolla att sidan inte redan har besökts under samma session
+        #returnera något?
+        # return False, None
+        # return True, BeautifulSoup()
+        # new_page, page = make_soup()
+        # if NewPage:
+        if url in self.VISITED_PAGES:
+            return False, None
+        else:
+            self.VISITED_PAGES.append(url)
+            try:
+                # test if page source is already in the cache file
+                page_source = self.cache[url]
+                print(f"From cache: {url}")
+            except KeyError:
+                # url not in cache
+                self.driver.get(url)  # wait condition efter get?
+                # waiting for a particular element of the page to load
+                # before returning the whole page
+                if wait_condition:
+                    WebDriverWait(self.driver, timeout=15).until(wait_condition)
+                print(f"From net: {url}")
+                page_source = self.driver.page_source
+                # add page source to cache
+                self.cache[url] = page_source
+                self.cache.sync()  # saves cache
+                # cache is also saved when scraping
+                # is finished with write_xlsx
+                # avoid hammering the server
+                time.sleep(self.WAIT_TIME)
+            return True, BeautifulSoup(page_source, parser)
 
     def write_cache(self):
         self.cache.close()
@@ -133,6 +160,8 @@ class MySpider(object):
                 yield from self.get_info_page(info_page_url)
         self.cache.close()
 
+    def save_geo_cache(self):
+        pass
 
 class ApoteksgruppenSpider(MySpider):
 
@@ -146,7 +175,7 @@ class ApoteksgruppenSpider(MySpider):
         """Trawls the sitemap for urls that link to individual store pages"""
         # apoteksgruppens sitemap
         print("Apoteksgruppen: Retrieves sitemap")
-        soup = self.make_soup(starting_url, parser="lxml-xml")
+        new_page, soup = self.make_soup(starting_url, parser="lxml-xml")
         locs = soup.find_all("loc")
         no_search_hits = 0
         for loc in locs:
@@ -166,34 +195,35 @@ class ApoteksgruppenSpider(MySpider):
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
-        soup = self.make_soup(url)
-        street_address = soup.find(itemprop="streetAddress").string
-        city = soup.find(itemprop="addressLocality").string
-        opening_hours = soup.select("section.pharmacy-opening-hours li")
-        store_name, *_ = soup.title.string.split(" - ")
-        for day in opening_hours:
-            weekday, *hours = day.text.split()
-            if len(hours) > 3:  # when "idag" is included in the opening hours
-                hours = hours[1:]
-            weekday_no = weekday_text_to_int(weekday)
-            # todo: add long and lat
-            # todo: is there not a zip code?
-            yield {
-                "chain": "Apoteksgruppen",
-                "url": url,
-                "store_name": store_name,
-                "long": "",
-                "lat": "",
-                "address": street_address,
-                "zipcode": "",
-                "city": city,
-                "datetime": datetime.now().isoformat(),
-                "weekday": weekday,
-                "weekday_no": weekday_no,
-                "hours": " ".join(hours),
-            }
+        new_page, soup = self.make_soup(url)
+        if new_page:
+            street_address = soup.find(itemprop="streetAddress").string
+            city = soup.find(itemprop="addressLocality").string
+            opening_hours = soup.select("section.pharmacy-opening-hours li")
+            store_name, *_ = soup.title.string.split(" - ")
+            for day in opening_hours:
+                weekday, *hours = day.text.split()
+                if len(hours) > 3:  # when "idag" is included in the opening hours
+                    hours = hours[1:]
+                weekday_no = weekday_text_to_int(weekday)
+                # todo: add long and lat
+                # todo: is there not a zip code?
+                yield {
+                    "chain": "Apoteksgruppen",
+                    "url": url,
+                    "store_name": store_name,
+                    "long": "",
+                    "lat": "",
+                    "address": street_address,
+                    "zipcode": "",
+                    "city": city,
+                    "datetime": datetime.now().isoformat(),
+                    "weekday": weekday,
+                    "weekday_no": weekday_no,
+                    "hours": " ".join(hours),
+                }
 
-
+#todo: uppdatera alla sidor med new_page
 class ApoteketSpider(MySpider):
 
     START_URLS = ["https://www.apoteket.se/sitemap.xml"]
