@@ -11,6 +11,7 @@ import os, os.path
 import glob
 import shelve
 import requests
+import platform
 
 WEEKDAYS = {
     "måndag": "1",
@@ -66,9 +67,21 @@ def test_weekday_text_to_int():
 
 
 def get_firefox_profile_path():
-    home = os.path.expanduser("~/.mozilla/firefox/")
-    return glob.glob(os.path.join(home, "*.default-*"))[0]
-
+    system = platform.system()
+    if system == "Darwin":
+        profile_home = os.path.expanduser(
+            "~/Library/Application Support/Firefox/Profiles"
+        )
+        profile_path = glob.glob(os.path.join(profile_home, "*.default"))[0]
+        return profile_path
+    elif system == "Linux":
+        profile_home = os.path.expanduser("~/.mozilla/firefox/")
+        profile_path = glob.glob(os.path.join(profile_home, "*.default*"))[0]
+        return profile_path
+    elif system == "Windows":
+        raise NotImplementedError(
+            "Windows not supported. Please see https://tinyurl.com/y4uey2eo"
+        )
 
 
 class ScrapeFailure(Exception):
@@ -91,9 +104,9 @@ class MySpider(object):
             os.mkdir("cache")
         self.cache = shelve.open(f"cache/{self.__class__.__name__}.pickle")
         self.geo_cache = shelve.open("cache/geocache.pickle")
-        #todo: read .secrets
+        # todo: read .secrets
 
-    def address_to_long_lat(self,address_string):
+    def address_to_long_lat(self, address_string, key):
         # check cache
         # if not cache
         try:
@@ -102,13 +115,20 @@ class MySpider(object):
             # ask for password
             # query mapquest
             # save cache
-            pass
-
-
+            url = f"http://www.mapquestapi.com/geocoding/v1/address?key={key}"
+            r = requests.post(url, data={"location": address_string})
+            # todo: returnera dict long,lat,address_string,postal_code,
+            # vad göra med mer än 1 träff?
+            if r:
+                geo_info = r.json()
+                for res in geo_info["results"]:
+                    if res:
+                        for loc in res["locations"]:
+                            print(loc["street"], loc["postalCode"], loc["latLng"])
 
     def make_soup(self, url, parser="lxml", wait_condition=False):
-        #todo: kolla att sidan inte redan har besökts under samma session
-        #returnera något?
+        # todo: kolla att sidan inte redan har besökts under samma session
+        # returnera något?
         # return False, None
         # return True, BeautifulSoup()
         # new_page, page = make_soup()
@@ -162,6 +182,7 @@ class MySpider(object):
 
     def save_geo_cache(self):
         pass
+
 
 class ApoteksgruppenSpider(MySpider):
 
@@ -223,7 +244,8 @@ class ApoteksgruppenSpider(MySpider):
                     "hours": " ".join(hours),
                 }
 
-#todo: uppdatera alla sidor med new_page
+
+# todo: uppdatera alla sidor med new_page
 class ApoteketSpider(MySpider):
 
     START_URLS = ["https://www.apoteket.se/sitemap.xml"]
@@ -253,7 +275,7 @@ class ApoteketSpider(MySpider):
         """Retrieves the store's opening hours and street address"""
         map_selector = ".mapImage-0-2-38"
         soup = self.make_soup(
-            url, wait_condition=lambda d: d.find_element_by_css_selector(map_selector),
+            url, wait_condition=lambda d: d.find_element_by_css_selector(map_selector)
         )
         soup = self.make_soup(url)
         # Store name and address
@@ -512,7 +534,7 @@ class HjartatSpider(MySpider):
 class SOAFSpider(MySpider):
     START_URLS = "http://www.soaf.nu/om-oss/medlemsf%C3%B6retag-32426937"
 
-    def get_members_page(self,start_url):
+    def get_members_page(self, start_url):
         soup = self.make_soup(start_url)
         for nr in range(1000):
             collection = soup.find(id=f"collection{nr}")
@@ -546,7 +568,7 @@ class SOAFSpider(MySpider):
                 ]
                 # todo: geocode address
                 if "Kontakt:" not in store_name:
-                    #skips the box with SOAFs contact info
+                    # skips the box with SOAFs contact info
                     for weekday in weekdays:
                         weekday_no = weekday_text_to_int(weekday)
                         zip_code = " "
@@ -656,6 +678,7 @@ def hjartat(output_directory, store=False):
         )
     )
 
+
 @scraper.command()
 @click.option(
     "--output-directory", help="Parent directory for xlsx files", default="output"
@@ -666,10 +689,10 @@ def soaf(output_directory, store=False):
     soaf = SOAFSpider()
     soaf.write_xlsx(
         os.path.join(
-            output_directory,
-            f"soaf_{datetime.now().isoformat().replace(':','_')}.xlsx",
+            output_directory, f"soaf_{datetime.now().isoformat().replace(':','_')}.xlsx"
         )
     )
+
 
 if __name__ == "__main__":
     scraper()
