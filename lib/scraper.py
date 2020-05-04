@@ -7,7 +7,8 @@ from datetime import datetime
 import petl as etl
 import re
 import click
-import os, os.path
+import os
+import os.path
 import glob
 import shelve
 import requests
