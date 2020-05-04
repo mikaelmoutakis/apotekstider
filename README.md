@@ -10,6 +10,7 @@ A set of python scripts for scraping the opening hours off the Swedish pharmacy 
     * selenium
     * click
     * petl
+* A key for MapQuests API
 
 ## Installation
 Install the required modules and applications. Please see the documentation for how to install each of them on your
@@ -19,6 +20,13 @@ operating system.
 Some of the pharmacy websites will not load unless you explicitly accept or reject requests for location.
 
 Go to preferences and "Privacy & Security". Under the section for "Permissions", press the settings button for "Location". Mark the checkbox for "block new requests asking to access your location".
+
+## Create a settings file
+Create a text file called ".secrets" in the same folder as this README document.
+The content should look like this:
+
+    [mapquest]
+    key = <your api key here>
 
 
 ## Usage

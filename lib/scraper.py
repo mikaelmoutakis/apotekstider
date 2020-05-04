@@ -12,6 +12,7 @@ import glob
 import shelve
 import requests
 import platform
+import configparser
 
 WEEKDAYS = {
     "måndag": "1",
@@ -104,36 +105,39 @@ class MySpider(object):
             os.mkdir("cache")
         self.cache = shelve.open(f"cache/{self.__class__.__name__}.pickle")
         self.geo_cache = shelve.open("cache/geocache.pickle")
-        # todo: read .secrets
+        self.secrets = configparser.ConfigParser()
+        self.secrets.read(".secrets")
 
-    def address_to_long_lat(self, address_string, key):
+    def address_to_long_lat(self, address_string):
         # check cache
         # if not cache
         try:
             geo_info = self.geo_cache[address_string]
+            print(f"Geo from cache: {address_string}")
         except KeyError:
             # ask for password
             # query mapquest
             # save cache
+            print(f"Geo from net: {address_string}")
+            key = self.secrets["mapquest"]["key"]
             url = f"http://www.mapquestapi.com/geocoding/v1/address?key={key}"
             r = requests.post(url, data={"location": address_string})
-            # todo: returnera dict long,lat,address_string,postal_code,
-            # vad göra med mer än 1 träff?
             if r:
                 geo_info = r.json()
-                for res in geo_info["results"]:
-                    if res:
-                        for loc in res["locations"]:
-                            print(loc["street"], loc["postalCode"], loc["latLng"])
+                self.geo_cache[address_string] = geo_info
+                self.geo_cache.sync()
+        if geo_info["results"]:
+            # returns only first hit
+            res, *_ = geo_info["results"]
+            if res:
+                loc = res["locations"][0]
+                return loc["street"], loc["postalCode"], loc["latLng"]
+            else:
+                return None
 
     def make_soup(self, url, parser="lxml", wait_condition=False):
-        # todo: kolla att sidan inte redan har besökts under samma session
-        # returnera något?
-        # return False, None
-        # return True, BeautifulSoup()
-        # new_page, page = make_soup()
-        # if NewPage:
         if url in self.VISITED_PAGES:
+            # already visited page during current session
             return False, None
         else:
             self.VISITED_PAGES.append(url)
@@ -179,9 +183,7 @@ class MySpider(object):
             for info_page_url in self.get_info_page_urls(start_url):
                 yield from self.get_info_page(info_page_url)
         self.cache.close()
-
-    def save_geo_cache(self):
-        pass
+        self.geo_cache.close()
 
 
 class ApoteksgruppenSpider(MySpider):
@@ -208,12 +210,6 @@ class ApoteksgruppenSpider(MySpider):
         if no_search_hits == 0:
             raise ScrapeFailure(f"Could not find any of apoteksgruppens store pages")
 
-    def def_get_map_page(self, street_address, city):
-        """Fetches longitud and latitude from
-        map page"""
-        # todo: implement this
-        pass
-
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
         new_page, soup = self.make_soup(url)
@@ -222,6 +218,9 @@ class ApoteksgruppenSpider(MySpider):
             city = soup.find(itemprop="addressLocality").string
             opening_hours = soup.select("section.pharmacy-opening-hours li")
             store_name, *_ = soup.title.string.split(" - ")
+            # from mapquest
+            address_string = f"{store_name}, {street_address}, {city}, Sweden"
+            mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(address_string)
             for day in opening_hours:
                 weekday, *hours = day.text.split()
                 if len(hours) > 3:  # when "idag" is included in the opening hours
@@ -236,12 +235,16 @@ class ApoteksgruppenSpider(MySpider):
                     "long": "",
                     "lat": "",
                     "address": street_address,
-                    "zipcode": "",
+                    "zip_code": "",
                     "city": city,
                     "datetime": datetime.now().isoformat(),
                     "weekday": weekday,
                     "weekday_no": weekday_no,
                     "hours": " ".join(hours),
+                    "mq_street": mq_street,
+                    "mq_zip_code": mq_zip_code,
+                    "mq_lat": mq_latLng["lat"],
+                    "mq_long": mq_latLng["lng"],
                 }
 
 
@@ -255,7 +258,7 @@ class ApoteketSpider(MySpider):
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
         print("Apoteket AB: Fetching sitemap")
-        soup = self.make_soup(starting_url, parser="lxml-xml")
+        new_page, soup = self.make_soup(starting_url, parser="lxml-xml")
         locs = soup.find_all("loc")  # all urls
         no_search_hits = 0
         for loc in locs:
@@ -274,48 +277,59 @@ class ApoteketSpider(MySpider):
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
         map_selector = ".mapImage-0-2-38"
-        soup = self.make_soup(
+        new_page, soup = self.make_soup(
             url, wait_condition=lambda d: d.find_element_by_css_selector(map_selector)
         )
-        soup = self.make_soup(url)
-        # Store name and address
-        store_name, *_ = soup.title.string.strip().split(" - ")
-        locatio_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
-        store_location = soup.select(locatio_selector)[0].string.strip()
-        *street_address, zip_city = store_location.split(",")
-        *zipcode, city = zip_city.split()
+        if new_page:
+            # soup = self.make_soup(url)
+            # Store name and address
+            store_name, *_ = soup.title.string.strip().split(" - ")
+            locatio_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
+            store_location = soup.select(locatio_selector)[0].string.strip()
+            *street_address, zip_city = store_location.split(",")
+            *zip_code, city = zip_city.split()
 
-        # geo-coordinates
-        mapimage = soup.select_one(".mapImage-0-2-38")
-        if mapimage:
-            src = mapimage["src"]
-            lat, long, *_ = re.findall(
-                "([0-9]{2}\.[0-9]{1,13})", src
-            )  # eller är det long, lat?
-        else:
-            print(f"No geo-info: {url}")
-            lat, long = "", ""
+            # geo-coordinates
+            mapimage = soup.select_one(".mapImage-0-2-38")
+            if mapimage:
+                src = mapimage["src"]
+                lat, long, *_ = re.findall(
+                    "([0-9]{2}\.[0-9]{1,13})", src
+                )  # eller är det long, lat?
+            else:
+                print(f"No geo-info: {url}")
+                lat, long = "", ""
 
-        # opening hours
-        opening_hours = soup.select("ul.underlined-list li")
-        for day in opening_hours:
-            weekday = day.select("span.date")[0].string.strip()
-            hours = day.select("span.time")[0].string.strip()
-            weekday_no = weekday_text_to_int(weekday)
-            yield {
-                "chain": "Apoteket AB",
-                "url": url,
-                "store_name": store_name,
-                "long": long,
-                "lat": lat,
-                "address": ", ".join(street_address),
-                "zipcode": "".join(zipcode),
-                "city": city,
-                "datetime": datetime.now().isoformat(),
-                "weekday": weekday,
-                "weekday_no": weekday_no,
-                "hours": hours,
-            }
+            # from mapquest
+            zip_code = "".join(zip_code)
+            street_address = ", ".join(street_address)
+            address_string = f"{store_name}, {street_address},{zip_code} {city}, Sweden"
+            mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(address_string)
+
+            # opening hours
+            opening_hours = soup.select("ul.underlined-list li")
+            for day in opening_hours:
+                weekday = day.select("span.date")[0].string.strip()
+                hours = day.select("span.time")[0].string.strip()
+                weekday_no = weekday_text_to_int(weekday)
+                yield {
+                    "chain": "Apoteket AB",
+                    "url": url,
+                    "store_name": store_name,
+                    "long": long,
+                    "lat": lat,
+                    "address": street_address,
+                    "zip_code": zip_code,
+                    "city": city,
+                    "datetime": datetime.now().isoformat(),
+                    "weekday": weekday,
+                    "weekday_no": weekday_no,
+                    "hours": hours,
+                    "mq_street": mq_street,
+                    "mq_zip_code": mq_zip_code,
+                    "mq_lat": mq_latLng["lat"],
+                    "mq_long": mq_latLng["lng"],
+                }
 
 
 class LloydsSpider(MySpider):
@@ -327,9 +341,9 @@ class LloydsSpider(MySpider):
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
         print("Lloyds Apotek: Hämtar sitemap")
-        soup = self.make_soup(starting_url, parser="lxml-xml")
+        new_page, soup = self.make_soup(starting_url, parser="lxml-xml")
         locs = soup.find_all("loc")
-        stores_sitemap = self.make_soup(locs[4].text, parser="lxml-xml")
+        new_page, stores_sitemap = self.make_soup(locs[4].text, parser="lxml-xml")
         store_list = stores_sitemap.select("loc")
         for store in store_list:
             yield store.text
@@ -338,48 +352,63 @@ class LloydsSpider(MySpider):
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
-        soup = self.make_soup(url)
-        # Store name and address
-        # todo: fix this
-        store_name, *_ = soup.title.string.strip().split(" | ")
-        location_selector = ".hidden-xs"
-        store_location = soup.select_one(location_selector)
-        street_address, zipcode, city = store_location.get_text().split("\xa0")
+        new_page, soup = self.make_soup(url)
+        if new_page:
+            # Store name and address
+            # todo: fix this
+            store_name, *_ = soup.title.string.strip().split(" | ")
+            location_selector = ".hidden-xs"
+            store_location = soup.select_one(location_selector)
+            street_address, zip_code, city = store_location.get_text().split("\xa0")
+            zip_code = zip_code.strip()
+            street_address = street_address.strip()
 
-        # geo-coordinates
-        # long and lat are in the url
-        # e.g. https://www.lloydsapotek.se/vitusapotek/lase_pos_7350051481598?lat=59.3350037&amp;long=18.064591
-        *_, url_params = url.split("?")
-        lat, long, *_ = re.findall("\d{2}\.\d{1,13}", url_params)
+            # geo-coordinates
+            # long and lat are in the url
+            # e.g. https://www.lloydsapotek.se/vitusapotek/lase_pos_7350051481598?lat=59.3350037&amp;long=18.064591
+            *_, url_params = url.split("?")
+            lat, long, *_ = re.findall("\d{2}\.\d{1,13}", url_params)
 
-        # opening hours
-        opening_hours = soup.select_one("div.col-md-6:nth-child(1) > div:nth-child(2)")
-        # Example
-        # """Ordinarie öppettider
-        # Måndag-Fredag: 09:00-17:00
-        # Lördag-Söndag: 00:00-00:00
-        # Avvikande öppettider
-        # Valborgsmässoaf (30/04): 07:30-19:00
-        # Första maj (01/05): 11:00-16:00"""
-        txt = opening_hours.get_text(";").split(";")
-        rows = [row.strip() for row in txt if ":" in row]
-        for day in rows:
-            weekday, *hours = day.split(":")
-            weekday_no = weekday_text_to_int(weekday)
-            yield {
-                "chain": "Lloyds Apotek",
-                "url": url,
-                "store_name": store_name,
-                "long": long,
-                "lat": lat,
-                "address": street_address.strip(),
-                "zipcode": zipcode.strip(),
-                "city": city,
-                "datetime": datetime.now().isoformat(),
-                "weekday": weekday,
-                "weekday_no": weekday_no,
-                "hours": ":".join(hours).strip(),
-            }
+            # mapquest
+            address_string = (
+                f"{store_name}, {street_address}, {zip_code} {city}, Sweden"
+            )
+            mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(address_string)
+
+            # opening hours
+            opening_hours = soup.select_one(
+                "div.col-md-6:nth-child(1) > div:nth-child(2)"
+            )
+            # Example
+            # """Ordinarie öppettider
+            # Måndag-Fredag: 09:00-17:00
+            # Lördag-Söndag: 00:00-00:00
+            # Avvikande öppettider
+            # Valborgsmässoaf (30/04): 07:30-19:00
+            # Första maj (01/05): 11:00-16:00"""
+            txt = opening_hours.get_text(";").split(";")
+            rows = [row.strip() for row in txt if ":" in row]
+            for day in rows:
+                weekday, *hours = day.split(":")
+                weekday_no = weekday_text_to_int(weekday)
+                yield {
+                    "chain": "Lloyds Apotek",
+                    "url": url,
+                    "store_name": store_name,
+                    "long": long,
+                    "lat": lat,
+                    "address": street_address,
+                    "zip_code": zip_code,
+                    "city": city,
+                    "datetime": datetime.now().isoformat(),
+                    "weekday": weekday,
+                    "weekday_no": weekday_no,
+                    "hours": ":".join(hours).strip(),
+                    "mq_street": mq_street,
+                    "mq_zip_code": mq_zip_code,
+                    "mq_lat": mq_latLng["lat"],
+                    "mq_long": mq_latLng["lng"],
+                }
 
 
 class KronansApotekSpider(MySpider):
@@ -389,7 +418,7 @@ class KronansApotekSpider(MySpider):
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
         print("Kronans Apotek: Hämtar sitemap")
-        soup = self.make_soup(starting_url, parser="lxml-xml")
+        new_page, soup = self.make_soup(starting_url, parser="lxml-xml")
         # there is a bug in either the xml parser or
         # - more likely - in kronans sitemap index
         # that makes the parser choke
@@ -397,7 +426,7 @@ class KronansApotekSpider(MySpider):
         # regex.
         links = re.findall("https://www\..*\.xml", soup.text)
         next_url = links[4]
-        stores_sitemap = self.make_soup(next_url, parser="lxml-xml")
+        new_page, stores_sitemap = self.make_soup(next_url, parser="lxml-xml")
         store_list = stores_sitemap.select("loc")
         for store in store_list:
             yield store.text
@@ -413,42 +442,55 @@ class KronansApotekSpider(MySpider):
         #         detail_pane_selector
         #     ),
         # )
-        soup = self.make_soup(url)
-        # Store name and address
-        store_name, *_ = soup.title.string.strip().split(" | ")
-        street_address = soup.find(itemprop="streetAddress")
-        if street_address:
-            # url is a valid store page
-            street_address = street_address.string
-            zip_code = soup.find(itemprop="postalCode").string
-            city = soup.find(itemprop="addressLocality").string
+        new_page, soup = self.make_soup(url)
+        if new_page:
+            # Store name and address
+            store_name, *_ = soup.title.string.strip().split(" | ")
+            street_address = soup.find(itemprop="streetAddress")
+            if street_address:
+                # url is a valid store page
+                street_address = street_address.string
+                zip_code = soup.find(itemprop="postalCode").string
+                city = soup.find(itemprop="addressLocality").string
 
-            # geo-coordinates
-            # long and lat are in the url
-            *_, url_params = url.split("?")
-            lat, long, *_ = re.findall("\d{2}\.\d{1,8}", url_params)
+                # geo-coordinates
+                # long and lat are in the url
+                *_, url_params = url.split("?")
+                lat, long, *_ = re.findall("\d{2}\.\d{1,8}", url_params)
 
-            # opening hours
-            opening_hours = soup.select_one(".store-openings")
-            # print(opening_hours)
-            days = opening_hours.find_all("dt")
-            opening_hours = opening_hours.find_all("dd")
-            for weekday, hours in zip(days, opening_hours):
-                weekday_no = weekday_text_to_int(weekday.text)
-                yield {
-                    "chain": "Kronans Apotek",
-                    "url": url,
-                    "store_name": store_name,
-                    "long": long,
-                    "lat": lat,
-                    "address": street_address.strip(),
-                    "zipcode": zip_code.strip(),
-                    "city": city.strip(),
-                    "datetime": datetime.now().isoformat(),
-                    "weekday": weekday.text.strip(),
-                    "weekday_no": weekday_no,
-                    "hours": hours.text.strip(),
-                }
+                # mapquest
+                address_string = (
+                    f"{store_name}, {street_address}, {zip_code} {city}, Sweden"
+                )
+                mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(
+                    address_string
+                )
+
+                # opening hours
+                opening_hours = soup.select_one(".store-openings")
+                # print(opening_hours)
+                days = opening_hours.find_all("dt")
+                opening_hours = opening_hours.find_all("dd")
+                for weekday, hours in zip(days, opening_hours):
+                    weekday_no = weekday_text_to_int(weekday.text)
+                    yield {
+                        "chain": "Kronans Apotek",
+                        "url": url,
+                        "store_name": store_name,
+                        "long": long,
+                        "lat": lat,
+                        "address": street_address.strip(),
+                        "zip_code": zip_code.strip(),
+                        "city": city.strip(),
+                        "datetime": datetime.now().isoformat(),
+                        "weekday": weekday.text.strip(),
+                        "weekday_no": weekday_no,
+                        "hours": hours.text.strip(),
+                        "mq_street": mq_street,
+                        "mq_zip_code": mq_zip_code,
+                        "mq_lat": mq_latLng["lat"],
+                        "mq_long": mq_latLng["lng"],
+                    }
 
 
 class HjartatSpider(MySpider):
@@ -461,13 +503,14 @@ class HjartatSpider(MySpider):
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
         print("Kronans Apotek: Hämtar sitemap")
-        soup = self.make_soup(starting_url, parser="lxml-xml")
+        new_page, soup = self.make_soup(starting_url, parser="lxml-xml")
         # Apoteket Hjartat seems to have temporary blacklist
         # If you hit any of the sitemap files more than X times per day
         # you will get a 404.
         locs = soup.find_all("loc")
         # Their xml is misconfigured. Parsing it as html
-        stores_sitemap = self.make_soup(locs[0].text, parser="lxml")
+        new_page, stores_sitemap = self.make_soup(locs[0].text, parser="lxml")
+        # print(stores_sitemap)
         store_list = stores_sitemap.select("loc")
         no_search_hits = 0
         for loc in store_list:
@@ -481,61 +524,74 @@ class HjartatSpider(MySpider):
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
         detail_pane_selector = "div.pharmacyMap a"
-        soup = self.make_soup(
+        new_page, soup = self.make_soup(
             url,
             wait_condition=lambda d: d.find_element_by_css_selector(
                 detail_pane_selector
             ),
         )
-        info_box = soup.find(id="findPharmacyContentHolder2")
-        if info_box:
+        if new_page:
+            info_box = soup.find(id="findPharmacyContentHolder2")
+            if info_box:
 
-            # Store name and address
-            *_, store_name = soup.title.string.strip().split(" vid ")
+                # Store name and address
+                *_, store_name = soup.title.string.strip().split(" vid ")
 
-            # postal adress
-            adr = soup.select_one(
-                "#findPharmacyContentHolder2 > div:nth-child(2) > p:nth-child(2)"
-            )
-            zip_code, city, *street_address = adr.text.strip().split("\n")
+                # postal adress
+                adr = soup.select_one(
+                    "#findPharmacyContentHolder2 > div:nth-child(2) > p:nth-child(2)"
+                )
+                zip_code, city, *street_address = adr.text.strip().split("\n")
 
-            # geo-coordinates
-            map_link = soup.select_one("div.pharmacyMap a")
-            if map_link:
-                lat, long = re.findall(
-                    "ll=(\d{2}\.\d{1,10}),(\d{2}\.\d{1,10})", map_link["href"]
-                )[0]
-            else:
-                lat, long = "", ""
+                # geo-coordinates
+                map_link = soup.select_one("div.pharmacyMap a")
+                if map_link:
+                    lat, long = re.findall(
+                        "ll=(\d{2}\.\d{1,10}),(\d{2}\.\d{1,10})", map_link["href"]
+                    )[0]
+                else:
+                    lat, long = "", ""
 
-            # opening hours
-            h = soup.select("span.opening_Hours")
-            d = soup.select("span.day_of_week")
-            opening_hours = [(day.text, hours.text) for day, hours in zip(d, h)]
+                # opening hours
+                h = soup.select("span.opening_Hours")
+                d = soup.select("span.day_of_week")
+                opening_hours = [(day.text, hours.text) for day, hours in zip(d, h)]
 
-            for weekday, hours in opening_hours:
-                weekday_no = weekday_text_to_int(weekday)
-                yield {
-                    "chain": "Apoteket Hjärtat",
-                    "url": url,
-                    "store_name": store_name,
-                    "long": long,
-                    "lat": lat,
-                    "address": " ".join(street_address),
-                    "zipcode": zip_code,
-                    "city": city,
-                    "datetime": datetime.now().isoformat(),
-                    "weekday": weekday,
-                    "weekday_no": weekday_no,
-                    "hours": hours,
-                }
+                # mapquest
+                address_string = (
+                    f"{store_name}, {street_address}, {zip_code} {city}, Sweden"
+                )
+                mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(
+                    address_string
+                )
+                # print(mq_street,mq_zip_code)
+                for weekday, hours in opening_hours:
+                    weekday_no = weekday_text_to_int(weekday)
+                    yield {
+                        "chain": "Apoteket Hjärtat",
+                        "url": url,
+                        "store_name": store_name,
+                        "long": long,
+                        "lat": lat,
+                        "address": street_address,
+                        "zip_code": zip_code,
+                        "city": city,
+                        "datetime": datetime.now().isoformat(),
+                        "weekday": weekday,
+                        "weekday_no": weekday_no,
+                        "hours": hours,
+                        "mq_street": mq_street,
+                        "mq_zip_code": mq_zip_code,
+                        "mq_lat": mq_latLng["lat"],
+                        "mq_long": mq_latLng["lng"],
+                    }
 
 
 class SOAFSpider(MySpider):
     START_URLS = "http://www.soaf.nu/om-oss/medlemsf%C3%B6retag-32426937"
 
     def get_members_page(self, start_url):
-        soup = self.make_soup(start_url)
+        new_page, soup = self.make_soup(start_url)
         for nr in range(1000):
             collection = soup.find(id=f"collection{nr}")
             if collection and "E-post" in collection.text:
@@ -569,6 +625,14 @@ class SOAFSpider(MySpider):
                 # todo: geocode address
                 if "Kontakt:" not in store_name:
                     # skips the box with SOAFs contact info
+                    # mapquest
+                    zip_city_region = ",".join(zip_city_region)
+                    address_string = (
+                        f"{store_name}, {street_address},  {zip_city_region}, Sweden"
+                    )
+                    mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(
+                        address_string
+                    )
                     for weekday in weekdays:
                         weekday_no = weekday_text_to_int(weekday)
                         zip_code = " "
@@ -579,12 +643,16 @@ class SOAFSpider(MySpider):
                             "long": "",
                             "lat": "",
                             "address": street_address,
-                            "zipcode": zip_code,
-                            "city": ",".join(zip_city_region),
+                            "zip_code": zip_code,
+                            "city": zip_city_region,
                             "datetime": datetime.now().isoformat(),
                             "weekday": weekday,
                             "weekday_no": weekday_no,
                             "hours": "",
+                            "mq_street": mq_street,
+                            "mq_zip_code": mq_zip_code,
+                            "mq_lat": mq_latLng["lat"],
+                            "mq_long": mq_latLng["lng"],
                         }
 
     def scrape(self):
