@@ -3,18 +3,24 @@ A set of python scripts for scraping the opening hours off the Swedish pharmacy 
 
 ## Requirements
 
-* Linux or OS X or any other UNIX-based operating system (not Windows).
+* Linux
 * Firefox with the geckoengine selenium driver
 * Python 3.5 or later with the following modules:
-    * BeautifulSoup
+    * BeautifulSoup4
     * selenium
     * click
     * petl
+    * lxml
+    * openpyxl
+    * requests
 * A key for MapQuests API
 
 ## Installation
 Install the required modules and applications. Please see the documentation for how to install each of them on your
-operating system.
+operating system. For Ubuntu 20.04 you run:
+
+    sudo apt install python3-pip firefox-geckoengine git
+    pip3 install --user beautifulsoup4 selenium click petl lxml openpyxl requests
 
 ###  Set Firefox to block all requests for your location.
 Some of the pharmacy websites will not load unless you explicitly accept or reject requests for location.
@@ -26,11 +32,11 @@ Create a text file called ".secrets" in the same folder as this README document.
 The content should look like this:
 
     [mapquest]
-    key = <your api key here>
+    key = <your long api key here>
 
 
 ## Usage
-Clone this repository and enter it
+After installing the requirements, setting Firefox to block location requests, and creating the settings file you clone this repository and enter it
 
     git clone https://github.com/mikaelmoutakis/apotekstider
     cd apotekstider
@@ -57,7 +63,5 @@ You  can also use scraper library to test Selenium and BeautifulSoup.
 
 
 ## Known bugs
-* For some pharmacy chains the scraper returns to the same store more than once.
-* Longitude and latitude are not scraped from every pharmacy chain.
 * The scripts do not scrape the homepages of SOAF's members.
 * You have to clear the cache manually: "rm cache/*.pickle"
