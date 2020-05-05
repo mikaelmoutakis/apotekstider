@@ -75,7 +75,10 @@ def get_firefox_profile_path():
             "~/Library/Application Support/Firefox/Profiles"
         )
         profile_path = glob.glob(os.path.join(profile_home, "*.default"))[0]
-        return profile_path
+        raise NotImplementedError(
+            "OS X not supported, yet."
+        )
+
     elif system == "Linux":
         profile_home = os.path.expanduser("~/.mozilla/firefox/")
         profile_path = glob.glob(os.path.join(profile_home, "*.default*"))[0]
