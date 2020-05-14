@@ -14,6 +14,7 @@ import shelve
 import requests
 import platform
 import configparser
+from pathlib import Path
 
 WEEKDAYS = {
     "måndag": "1",
@@ -75,9 +76,7 @@ def get_firefox_profile_path():
             "~/Library/Application Support/Firefox/Profiles"
         )
         profile_path = glob.glob(os.path.join(profile_home, "*.default"))[0]
-        raise NotImplementedError(
-            "OS X not supported, yet."
-        )
+        raise NotImplementedError("OS X not supported, yet.")
 
     elif system == "Linux":
         profile_home = os.path.expanduser("~/.mozilla/firefox/")
@@ -99,15 +98,16 @@ class MySpider(object):
     START_URLS = []
     VISITED_PAGES = []
 
-    def __init__(self, my_firefox_profile=False):
+    def __init__(self, my_firefox_profile=False, quit_when_finished=False):
+        self.quit_when_finished = quit_when_finished
         if not my_firefox_profile:
             my_firefox_profile = get_firefox_profile_path()
         self.profile = webdriver.FirefoxProfile(my_firefox_profile)
         self.driver = webdriver.Firefox(self.profile)
-        # todo: remove old cache files automatically
-        if not os.path.isdir("cache"):
-            os.mkdir("cache")
-        self.cache = shelve.open(f"cache/{self.__class__.__name__}.pickle")
+        cache_dir = Path(f"cache/{datetime.now().strftime('%Y-W%U')}")
+        if not cache_dir.is_dir():
+            cache_dir.mkdir(parents=True)
+        self.cache = shelve.open(f"{cache_dir}/{self.__class__.__name__}.pickle")
         self.geo_cache = shelve.open("cache/geocache.pickle")
         self.secrets = configparser.ConfigParser()
         self.secrets.read(".secrets")
@@ -188,6 +188,8 @@ class MySpider(object):
                 yield from self.get_info_page(info_page_url)
         self.cache.close()
         self.geo_cache.close()
+        if self.quit_when_finished:
+            self.driver.quit()
 
 
 class ApoteksgruppenSpider(MySpider):
@@ -662,6 +664,8 @@ class SOAFSpider(MySpider):
     def scrape(self):
         for row in self.get_members_page(self.START_URLS):
             yield row
+        if self.quit_when_finished:
+            self.driver.quit()
 
 
 @click.group()
@@ -708,9 +712,6 @@ def lloyds(output_directory):
     if not os.path.isdir(output_directory):
         os.mkdir(output_directory)
     lloyds = LloydsSpider()
-    # url = "https://www.lloydsapotek.se/vitusapotek/lase_pos_7350051480010?lat=59.3700775&long=16.5160475"
-    # for row in lloyds.get_info_page(url):
-    #     print(row)
     lloyds.write_xlsx(
         os.path.join(
             output_directory,
@@ -723,7 +724,7 @@ def lloyds(output_directory):
 @click.option(
     "--output-directory", help="Parent directory for xlsx files", default="output"
 )
-def kronans(output_directory, store=False):
+def kronans(output_directory):
     if not os.path.isdir(output_directory):
         os.mkdir(output_directory)
     kronans = KronansApotekSpider()
@@ -739,7 +740,7 @@ def kronans(output_directory, store=False):
 @click.option(
     "--output-directory", help="Parent directory for xlsx files", default="output"
 )
-def hjartat(output_directory, store=False):
+def hjartat(output_directory):
     if not os.path.isdir(output_directory):
         os.mkdir(output_directory)
     hjartat = HjartatSpider()
@@ -755,15 +756,36 @@ def hjartat(output_directory, store=False):
 @click.option(
     "--output-directory", help="Parent directory for xlsx files", default="output"
 )
-def soaf(output_directory, store=False):
+def soaf(output_directory):
     if not os.path.isdir(output_directory):
         os.mkdir(output_directory)
-    soaf = SOAFSpider()
+    soaf = SOAFSpider(quit_when_finished=True)
+    output_directory = Path.joinpath(Path(output_directory),
+                                     Path(f"{datetime.now().strftime('%Y-W%U')}"))
+    if not output_directory.exists():
+        output_directory.mkdir(parents=True)
     soaf.write_xlsx(
-        os.path.join(
-            output_directory, f"soaf_{datetime.now().isoformat().replace(':','_')}.xlsx"
+        Path.joinpath(
+            output_directory,
+            f"soaf_{datetime.now().isoformat().replace(':','_')}.xlsx",
         )
     )
+
+
+@scraper.command()
+@click.option(
+    "--output-directory", help="Parent directory for xlsx files", default="output"
+)
+def all(output_directory):
+    if not os.path.isdir(output_directory):
+        os.mkdir(output_directory)
+    apoteksgruppen(output_directory)
+    apoteket(output_directory)
+    lloyds(output_directory)
+    kronans(output_directory)
+    hjartat(output_directory)
+    soaf(output_directory)
+    # todo: github?
 
 
 if __name__ == "__main__":

@@ -21,6 +21,8 @@ operating system. For Ubuntu 20.04 you run:
 
     sudo apt install python3-pip firefox-geckoengine git
     pip3 install --user beautifulsoup4 selenium click petl lxml openpyxl requests
+    git clone https://github.com/mikaelmoutakis/apotekstider
+    cd apotekstider
 
 ###  Set Firefox to block all requests for your location.
 Some of the pharmacy websites will not load unless you explicitly accept or reject requests for location.
@@ -64,4 +66,8 @@ You  can also use scraper library to test Selenium and BeautifulSoup.
 
 ## Known bugs
 * The scripts do not scrape the homepages of SOAF's members.
-* You have to clear the cache manually: "rm cache/*.pickle"
+
+
+## Todo:
+* Add logging
+* Add sensible error handling so script can be run unmonitored
