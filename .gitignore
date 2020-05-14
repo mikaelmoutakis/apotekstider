@@ -1,4 +1,4 @@
-cache/*.pickle
+cache/*
 geckodriver.log
 .idea
 __pycache__
