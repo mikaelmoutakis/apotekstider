@@ -24,6 +24,17 @@ operating system. For Ubuntu 20.04 you run:
     git clone https://github.com/mikaelmoutakis/apotekstider
     cd apotekstider
 
+For FreeBSD 11.3 you run:
+
+    pkg install -y git python37 py37-pip firefox geckodriver py37-selenium py37-lxml
+    ln /usr/local/bin/python3.7 /usr/local/bin/python3
+    adduser #add a non-privileged user to run the script
+
+For the non-privileged user run
+
+    pip install --user beautifulsoup4 selenium click petl openpyxl requests
+
+
 ###  Set Firefox to block all requests for your location.
 Some of the pharmacy websites will not load unless you explicitly accept or reject requests for location.
 
@@ -71,3 +82,5 @@ You  can also use scraper library to test Selenium and BeautifulSoup.
 ## Todo:
 * Add logging
 * Add sensible error handling so script can be run unmonitored
+* Add headless option for running ALL
+* If headless, point to profile

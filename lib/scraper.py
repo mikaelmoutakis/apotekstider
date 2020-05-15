@@ -15,6 +15,7 @@ import requests
 import platform
 import configparser
 from pathlib import Path
+import json
 
 WEEKDAYS = {
     "måndag": "1",
@@ -98,7 +99,7 @@ class MySpider(object):
     START_URLS = []
     VISITED_PAGES = []
 
-    def __init__(self, my_firefox_profile=False, quit_when_finished=False):
+    def __init__(self, my_firefox_profile=False, quit_when_finished=True):
         self.quit_when_finished = quit_when_finished
         if not my_firefox_profile:
             my_firefox_profile = get_firefox_profile_path()
@@ -282,7 +283,9 @@ class ApoteketSpider(MySpider):
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
-        map_selector = ".mapImage-0-2-38"
+        #map_selector = ".mapImage-0-2-38"
+        map_selector = "#pharmaciesmap-root > div > a > img"
+        #map_selector = "#pharmaciesmap-root"
         new_page, soup = self.make_soup(
             url, wait_condition=lambda d: d.find_element_by_css_selector(map_selector)
         )
@@ -290,13 +293,15 @@ class ApoteketSpider(MySpider):
             # soup = self.make_soup(url)
             # Store name and address
             store_name, *_ = soup.title.string.strip().split(" - ")
-            locatio_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
-            store_location = soup.select(locatio_selector)[0].string.strip()
+            location_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
+            store_location = soup.select(location_selector)[0].string.strip()
             *street_address, zip_city = store_location.split(",")
             *zip_code, city = zip_city.split()
 
             # geo-coordinates
-            mapimage = soup.select_one(".mapImage-0-2-38")
+            mapimage = soup.select_one("#pharmaciesmap-root img")
+            #print(mapimage)
+
             if mapimage:
                 src = mapimage["src"]
                 lat, long, *_ = re.findall(
@@ -548,6 +553,7 @@ class HjartatSpider(MySpider):
                     "#findPharmacyContentHolder2 > div:nth-child(2) > p:nth-child(2)"
                 )
                 zip_code, city, *street_address = adr.text.strip().split("\n")
+                street_address = " ".join(street_address)
 
                 # geo-coordinates
                 map_link = soup.select_one("div.pharmacyMap a")
@@ -570,7 +576,6 @@ class HjartatSpider(MySpider):
                 mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(
                     address_string
                 )
-                # print(mq_street,mq_zip_code)
                 for weekday, hours in opening_hours:
                     weekday_no = weekday_text_to_int(weekday)
                     yield {
@@ -772,20 +777,20 @@ def soaf(output_directory):
     )
 
 
-@scraper.command()
-@click.option(
-    "--output-directory", help="Parent directory for xlsx files", default="output"
-)
-def all(output_directory):
-    if not os.path.isdir(output_directory):
-        os.mkdir(output_directory)
-    apoteksgruppen(output_directory)
-    apoteket(output_directory)
-    lloyds(output_directory)
-    kronans(output_directory)
-    hjartat(output_directory)
-    soaf(output_directory)
-    # todo: github?
+# @scraper.command()
+# @click.option(
+#     "--output-directory", help="Parent directory for xlsx files", default="output"
+# )
+# def all(output_directory):
+#     if not os.path.isdir(output_directory):
+#         os.mkdir(output_directory)
+#     apoteksgruppen(output_directory)
+#     apoteket(output_directory)
+#     lloyds(output_directory)
+#     kronans(output_directory)
+#     hjartat(output_directory)
+#     soaf(output_directory)
+#     # todo: github?
 
 
 if __name__ == "__main__":
