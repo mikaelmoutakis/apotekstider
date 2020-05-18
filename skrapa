@@ -2,21 +2,20 @@
 """Scrape Swedish pharmacies for opening hours.
 
 Usage:
-  skrapa ALLA
-  skrapa apoteksgruppen
-  skrapa apoteket
-  skrapa lloyds
-  skrapa kronans
-  skrapa hjartat
-  skrapa soaf
+  skrapa [--output=<dir>] [--headless] [--profile=<profile>] APOTEK
+  skrapa (-h | --help)
 
 Options:
-  -h --help             Show this screen.
-  -f --firefox-profile  Path to profile
-  -o --output           Output directory
-  -h --headless         Run Firefox headless
+  -h --help                             Show this screen.
+  --profile=<profile>                   Path to Firefox profile
+  --output=<dir>                        Output directory
+  --headless                            Run Firefox headless
+
 
 A set of scripts for retrieving opening hours from all the major pharmacy chains in Sweden.
+
+APOTEK = (ALLA|apoteksgruppen|apoteket|lloyds|kronans|hjartat|soaf)
+
 Requires Firefox with the geckoengine driver, python 3.5 or later, and a API key for MapQuest.
 Before running this program, you need to create text file called ".secrets"
 in the same folder as this README document. The content should look like this:
@@ -30,31 +29,45 @@ Then, you need to start Firefox and set it to block location requests.
 from docopt import docopt
 import lib.scraper as sc
 import os
-import datetime
+from datetime import datetime
+import sys
 
 
-
-
-if __name__=="__main__":
-    #options: firefox profile, output directory, headless,
-    #arguments: pharmacy
+if __name__ == "__main__":
+    # options: firefox profile, output directory, headless,
+    # arguments: pharmacy
+    arguments = docopt(__doc__, version="skrapa 0.1")
+    # print(arguments)
     all_modules = {
-        "apoteksgruppen":sc.ApoteksgruppenSpider,
-        "apoteket":sc.ApoteketSpider,
-        "lloyds":sc.LloydsSpider,
-        "kronans":sc.KronansApotekSpider,
-        "hjartat":sc.HjartatSpider,
-        "soaf":sc.SOAFSpider
+        "apoteksgruppen": sc.ApoteksgruppenSpider,
+        "apoteket": sc.ApoteketSpider,
+        "lloyds": sc.LloydsSpider,
+        "kronans": sc.KronansApotekSpider,
+        "hjartat": sc.HjartatSpider,
+        "soaf": sc.SOAFSpider,
     }
-    if selected_pharmacy=="ALLA":
+    # select chain to scrape or ALLA for all
+    if arguments["APOTEK"] == "ALLA":
         pharmacies = all_modules.keys()
+    elif arguments["APOTEK"] in all_modules:
+        pharmacies = [arguments["APOTEK"]]
     else:
-        pharmacies = [selected_pharmacy]
-    #scrape one or many pharmacy chain
+        print(f'{arguments["APOTEK"]} is not a valid Pharmacy Chain')
+        sys.exit(1)
+
+    # scrape one or many pharmacy chain
+    if not arguments["--output"]:
+        output_directory = "output"
+    else:
+        output_directory = arguments["--output"]
+
+    # scrape one or all chains
     for current_pharmacy in pharmacies:
         if not os.path.isdir(output_directory):
             os.mkdir(output_directory)
-        curr_module = all_modules[current_pharmacy]() #my_firefox_profile=False, quit_when_finished=True):
+        curr_module = all_modules[current_pharmacy](
+            my_firefox_profile=arguments["--profile"], headless=arguments["--headless"]
+        )
         curr_module.write_xlsx(
             os.path.join(
                 output_directory,

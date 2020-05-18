@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.firefox.options import Options
 from bs4 import BeautifulSoup
 import time
 from datetime import datetime
 import petl as etl
 import re
-import click
+
+# import click
 import os
 import os.path
 import glob
@@ -15,7 +17,8 @@ import requests
 import platform
 import configparser
 from pathlib import Path
-import json
+
+# import json
 
 WEEKDAYS = {
     "måndag": "1",
@@ -47,7 +50,7 @@ def weekday_text_to_int(txt, weekdaynow=None):
         else:
             return f"{weekdaynow + 1}"
     else:
-        txt, *_ = txt.split() #Måndag (bla bla)
+        txt, *_ = txt.split()  # Måndag (bla bla)
         if txt in WEEKDAYS:
             return WEEKDAYS[txt]
         else:
@@ -72,23 +75,28 @@ def test_weekday_text_to_int():
     assert output == correct_output
 
 
-def get_firefox_profile_path():
-    system = platform.system()
-    if system == "Darwin":
-        profile_home = os.path.expanduser(
-            "~/Library/Application Support/Firefox/Profiles"
-        )
-        profile_path = glob.glob(os.path.join(profile_home, "*.default"))[0]
-        raise NotImplementedError("OS X not supported, yet.")
+def get_firefox_profile_path(my_firefox_profile=None):
+    if not my_firefox_profile:
+        system = platform.system()
+        if system == "Darwin":
+            profile_home = os.path.expanduser(
+                "~/Library/Application Support/Firefox/Profiles"
+            )
+            profile_path = glob.glob(os.path.join(profile_home, "*.default"))[0]
+            raise NotImplementedError("OS X not supported, yet.")
 
-    elif system == "Linux":
-        profile_home = os.path.expanduser("~/.mozilla/firefox/")
+        elif system == "Linux":
+            profile_home = os.path.expanduser("~/.mozilla/firefox/")
+            profile_path = glob.glob(os.path.join(profile_home, "*.default*"))[0]
+            return profile_path
+        elif system == "Windows":
+            raise NotImplementedError(
+                "Windows not supported. Please see https://tinyurl.com/y4uey2eo"
+            )
+    else:
+        profile_home = os.path.expanduser(my_firefox_profile)
         profile_path = glob.glob(os.path.join(profile_home, "*.default*"))[0]
         return profile_path
-    elif system == "Windows":
-        raise NotImplementedError(
-            "Windows not supported. Please see https://tinyurl.com/y4uey2eo"
-        )
 
 
 class ScrapeFailure(Exception):
@@ -101,12 +109,17 @@ class MySpider(object):
     START_URLS = []
     VISITED_PAGES = []
 
-    def __init__(self, my_firefox_profile=False, quit_when_finished=True):
+    def __init__(
+        self, my_firefox_profile=None, quit_when_finished=True, headless=False
+    ):
         self.quit_when_finished = quit_when_finished
-        if not my_firefox_profile:
-            my_firefox_profile = get_firefox_profile_path()
+        my_firefox_profile = get_firefox_profile_path(my_firefox_profile)
+        # firefox settings
+        options = Options()
+        options.headless = headless
         self.profile = webdriver.FirefoxProfile(my_firefox_profile)
-        self.driver = webdriver.Firefox(self.profile)
+        self.driver = webdriver.Firefox(self.profile, options=options)
+        # caching
         cache_dir = Path(f"cache/{datetime.now().strftime('%Y-W%W')}")
         if not cache_dir.is_dir():
             cache_dir.mkdir(parents=True)
@@ -285,9 +298,9 @@ class ApoteketSpider(MySpider):
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
-        #map_selector = ".mapImage-0-2-38"
+        # map_selector = ".mapImage-0-2-38"
         map_selector = "#pharmaciesmap-root > div > a > img"
-        #map_selector = "#pharmaciesmap-root"
+        # map_selector = "#pharmaciesmap-root"
         new_page, soup = self.make_soup(
             url, wait_condition=lambda d: d.find_element_by_css_selector(map_selector)
         )
@@ -302,7 +315,7 @@ class ApoteketSpider(MySpider):
 
             # geo-coordinates
             mapimage = soup.select_one("#pharmaciesmap-root img")
-            #print(mapimage)
+            # print(mapimage)
 
             if mapimage:
                 src = mapimage["src"]
@@ -675,109 +688,109 @@ class SOAFSpider(MySpider):
             self.driver.quit()
 
 
-@click.group()
-def scraper():
-    pass
-
-
-@scraper.command()
-@click.option(
-    "--output-directory", help="Parent directory for xlsx files", default="output"
-)
-def apoteksgruppen(output_directory):
-    if not os.path.isdir(output_directory):
-        os.mkdir(output_directory)
-    apoteksgruppen = ApoteksgruppenSpider()
-    apoteksgruppen.write_xlsx(
-        os.path.join(
-            output_directory, f"apoteksgruppen_{datetime.now().isoformat()}.xlsx"
-        )
-    )
-
-
-@scraper.command()
-@click.option(
-    "--output-directory", help="Parent directory for xlsx files", default="output"
-)
-def apoteket(output_directory):
-    if not os.path.isdir(output_directory):
-        os.mkdir(output_directory)
-    apoteket = ApoteketSpider()
-    apoteket.write_xlsx(
-        os.path.join(
-            output_directory,
-            f"apoteket_{datetime.now().isoformat().replace(':','_')}.xlsx",
-        )
-    )
-
-
-@scraper.command()
-@click.option(
-    "--output-directory", help="Parent directory for xlsx files", default="output"
-)
-def lloyds(output_directory):
-    if not os.path.isdir(output_directory):
-        os.mkdir(output_directory)
-    lloyds = LloydsSpider()
-    lloyds.write_xlsx(
-        os.path.join(
-            output_directory,
-            f"lloyds_{datetime.now().isoformat().replace(':','_')}.xlsx",
-        )
-    )
-
-
-@scraper.command()
-@click.option(
-    "--output-directory", help="Parent directory for xlsx files", default="output"
-)
-def kronans(output_directory):
-    if not os.path.isdir(output_directory):
-        os.mkdir(output_directory)
-    kronans = KronansApotekSpider()
-    kronans.write_xlsx(
-        os.path.join(
-            output_directory,
-            f"kronans_{datetime.now().isoformat().replace(':','_')}.xlsx",
-        )
-    )
-
-
-@scraper.command()
-@click.option(
-    "--output-directory", help="Parent directory for xlsx files", default="output"
-)
-def hjartat(output_directory):
-    if not os.path.isdir(output_directory):
-        os.mkdir(output_directory)
-    hjartat = HjartatSpider()
-    hjartat.write_xlsx(
-        os.path.join(
-            output_directory,
-            f"hjartat_{datetime.now().isoformat().replace(':','_')}.xlsx",
-        )
-    )
-
-
-@scraper.command()
-@click.option(
-    "--output-directory", help="Parent directory for xlsx files", default="output"
-)
-def soaf(output_directory):
-    if not os.path.isdir(output_directory):
-        os.mkdir(output_directory)
-    soaf = SOAFSpider(quit_when_finished=True)
-    output_directory = Path.joinpath(Path(output_directory),
-                                     Path(f"{datetime.now().strftime('%Y-W%W')}"))
-    if not output_directory.exists():
-        output_directory.mkdir(parents=True)
-    soaf.write_xlsx(
-        Path.joinpath(
-            output_directory,
-            f"soaf_{datetime.now().isoformat().replace(':','_')}.xlsx",
-        )
-    )
-
+# @click.group()
+# def scraper():
+#     pass
+#
+#
+# @scraper.command()
+# @click.option(
+#     "--output-directory", help="Parent directory for xlsx files", default="output"
+# )
+# def apoteksgruppen(output_directory):
+#     if not os.path.isdir(output_directory):
+#         os.mkdir(output_directory)
+#     apoteksgruppen = ApoteksgruppenSpider()
+#     apoteksgruppen.write_xlsx(
+#         os.path.join(
+#             output_directory, f"apoteksgruppen_{datetime.now().isoformat()}.xlsx"
+#         )
+#     )
+#
+#
+# @scraper.command()
+# @click.option(
+#     "--output-directory", help="Parent directory for xlsx files", default="output"
+# )
+# def apoteket(output_directory):
+#     if not os.path.isdir(output_directory):
+#         os.mkdir(output_directory)
+#     apoteket = ApoteketSpider()
+#     apoteket.write_xlsx(
+#         os.path.join(
+#             output_directory,
+#             f"apoteket_{datetime.now().isoformat().replace(':','_')}.xlsx",
+#         )
+#     )
+#
+#
+# @scraper.command()
+# @click.option(
+#     "--output-directory", help="Parent directory for xlsx files", default="output"
+# )
+# def lloyds(output_directory):
+#     if not os.path.isdir(output_directory):
+#         os.mkdir(output_directory)
+#     lloyds = LloydsSpider()
+#     lloyds.write_xlsx(
+#         os.path.join(
+#             output_directory,
+#             f"lloyds_{datetime.now().isoformat().replace(':','_')}.xlsx",
+#         )
+#     )
+#
+#
+# @scraper.command()
+# @click.option(
+#     "--output-directory", help="Parent directory for xlsx files", default="output"
+# )
+# def kronans(output_directory):
+#     if not os.path.isdir(output_directory):
+#         os.mkdir(output_directory)
+#     kronans = KronansApotekSpider()
+#     kronans.write_xlsx(
+#         os.path.join(
+#             output_directory,
+#             f"kronans_{datetime.now().isoformat().replace(':','_')}.xlsx",
+#         )
+#     )
+#
+#
+# @scraper.command()
+# @click.option(
+#     "--output-directory", help="Parent directory for xlsx files", default="output"
+# )
+# def hjartat(output_directory):
+#     if not os.path.isdir(output_directory):
+#         os.mkdir(output_directory)
+#     hjartat = HjartatSpider()
+#     hjartat.write_xlsx(
+#         os.path.join(
+#             output_directory,
+#             f"hjartat_{datetime.now().isoformat().replace(':','_')}.xlsx",
+#         )
+#     )
+#
+#
+# @scraper.command()
+# @click.option(
+#     "--output-directory", help="Parent directory for xlsx files", default="output"
+# )
+# def soaf(output_directory):
+#     if not os.path.isdir(output_directory):
+#         os.mkdir(output_directory)
+#     soaf = SOAFSpider(quit_when_finished=True)
+#     output_directory = Path.joinpath(Path(output_directory),
+#                                      Path(f"{datetime.now().strftime('%Y-W%W')}"))
+#     if not output_directory.exists():
+#         output_directory.mkdir(parents=True)
+#     soaf.write_xlsx(
+#         Path.joinpath(
+#             output_directory,
+#             f"soaf_{datetime.now().isoformat().replace(':','_')}.xlsx",
+#         )
+#     )
+#
 
 # @scraper.command()
 # @click.option(
