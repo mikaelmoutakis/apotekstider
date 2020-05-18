@@ -1,0 +1,8 @@
+beautifulsoup4
+selenium
+loguru
+petl
+openpyxl
+requests
+docopt
+lxml
