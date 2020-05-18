@@ -32,7 +32,7 @@ WEEKDAYS = {
 def weekday_text_to_int(txt, weekdaynow=None):
     """Returns 1 for Monday, 2 for Tuesday etc"""
     # todo: fixa funktion för "måndag - fredag" mm
-    # todo: fixa funktion för "Lördag (idag)".
+    # todo: fixa funktion för "Lördag (idag)". tex genom att välja första ordet (splitta med mellanslag)
     if weekdaynow is None:
         # weekdaynow=X is used for testing
         weekdaynow = datetime.now().isoweekday()
@@ -40,16 +40,18 @@ def weekday_text_to_int(txt, weekdaynow=None):
         return None
     txt = txt.lower().strip()
     if "idag" in txt:
-        return weekdaynow
+        return f"{weekdaynow}"
     elif "imorgon" in txt:
         if weekdaynow == 7:
             return "1"
         else:
             return f"{weekdaynow + 1}"
-    elif txt in WEEKDAYS:
-        return WEEKDAYS[txt]
     else:
-        return None
+        txt, *_ = txt.split() #Måndag (bla bla)
+        if txt in WEEKDAYS:
+            return WEEKDAYS[txt]
+        else:
+            return None
 
 
 def test_weekday_text_to_int():
@@ -65,7 +67,7 @@ def test_weekday_text_to_int():
         "torsdag",
         "blaha",
     ]
-    correct_output = [3, 4, 5, 6, 7, 1, 2, 3, 4, None]
+    correct_output = ["3", "4", "5", "6", "7", "1", "2", "3", "4", None]
     output = [weekday_text_to_int(x, 3) for x in examples]
     assert output == correct_output
 
@@ -105,7 +107,7 @@ class MySpider(object):
             my_firefox_profile = get_firefox_profile_path()
         self.profile = webdriver.FirefoxProfile(my_firefox_profile)
         self.driver = webdriver.Firefox(self.profile)
-        cache_dir = Path(f"cache/{datetime.now().strftime('%Y-W%U')}")
+        cache_dir = Path(f"cache/{datetime.now().strftime('%Y-W%W')}")
         if not cache_dir.is_dir():
             cache_dir.mkdir(parents=True)
         self.cache = shelve.open(f"{cache_dir}/{self.__class__.__name__}.pickle")
@@ -766,7 +768,7 @@ def soaf(output_directory):
         os.mkdir(output_directory)
     soaf = SOAFSpider(quit_when_finished=True)
     output_directory = Path.joinpath(Path(output_directory),
-                                     Path(f"{datetime.now().strftime('%Y-W%U')}"))
+                                     Path(f"{datetime.now().strftime('%Y-W%W')}"))
     if not output_directory.exists():
         output_directory.mkdir(parents=True)
     soaf.write_xlsx(
@@ -793,5 +795,5 @@ def soaf(output_directory):
 #     # todo: github?
 
 
-if __name__ == "__main__":
-    scraper()
+# if __name__ == "__main__":
+#     scraper()

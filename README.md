@@ -80,7 +80,10 @@ You  can also use scraper library to test Selenium and BeautifulSoup.
 
 
 ## Todo:
+* Update CLI, split lib from CLI
 * Add logging
 * Add sensible error handling so script can be run unmonitored
 * Add headless option for running ALL
 * If headless, point to profile
+* Add command for extracting html pages from cache
+* Extend weekday_text_to_int with more examples
