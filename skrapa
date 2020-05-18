@@ -141,6 +141,7 @@ class MySpider(object):
     ):
         self.quit_when_finished = quit_when_finished
         my_firefox_profile = get_firefox_profile_path(my_firefox_profile)
+        logger.info(f"Using profile: {my_firefox_profile}")
         # firefox settings
         options = Options()
         options.headless = headless
@@ -183,7 +184,7 @@ class MySpider(object):
             else:
                 return None
 
-    def make_soup(self, url, parser="lxml", wait_condition=False):
+    def make_soup(self, url, parser="lxml", wait_condition=False):#, cache_file_name=None):
         #logger.debug(f"URL: {url}")
         if url in self.VISITED_PAGES:
             # already visited page during current session
@@ -567,8 +568,15 @@ class HjartatSpider(MySpider):
         # Their xml is misconfigured. Parsing it as html
         if not locs:
             logger.debug(f"{soup.title}")
-            raise ScrapeFailure(f"Could not find Apoteket Hjärtats sitemap")
-        new_page, stores_sitemap = self.make_soup(locs[0].text, parser="lxml")
+            #todo: read from cache, log a warning
+            #read stores_sitemap from cache
+            # cache_file_name = cache/hjartat_sitemap.pickle
+            #raise ScrapeFailure(f"Could not find Apoteket Hjärtats sitemap")
+        else:
+            #todo save sitemap as cache/hjartat_sitemap.pickle
+            pass
+
+        new_page, stores_sitemap = self.make_soup(locs[0].text, parser="lxml") #cache_file_name = cache/hjartat_sitemap.pickle
         # logger.debug(stores_sitemap)
         store_list = stores_sitemap.select("loc")
         no_search_hits = 0
