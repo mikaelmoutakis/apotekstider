@@ -184,8 +184,12 @@ class MySpider(object):
             else:
                 return None
 
-    def make_soup(self, url, parser="lxml", wait_condition=False):#, cache_file_name=None):
-        #logger.debug(f"URL: {url}")
+    def make_soup(self, url, parser="lxml", wait_condition=False, soup_cache=None):
+        # soup_cache != None when Hjärtat's sitemap is unavaiable
+        # and we need to read from a previous sitemap
+        # TODO: add timestamp to each entry in the cache
+        if not soup_cache:
+            soup_cache = self.cache
         if url in self.VISITED_PAGES:
             # already visited page during current session
             return False, None
@@ -193,8 +197,8 @@ class MySpider(object):
             self.VISITED_PAGES.append(url)
             try:
                 # test if page source is already in the cache file
-                page_source = self.cache[url]
-                logger.info(f"From cache: {url}")
+                page_source = soup_cache[url]
+                logger.info(f"Soup from cache: {url}")
             except KeyError:
                 # url not in cache
                 self.driver.get(url)  # wait condition efter get?
@@ -205,8 +209,8 @@ class MySpider(object):
                 logger.info(f"From net: {url}")
                 page_source = self.driver.page_source
                 # add page source to cache
-                self.cache[url] = page_source
-                self.cache.sync()  # saves cache
+                soup_cache[url] = page_source
+                soup_cache.sync()  # saves cache
                 # cache is also saved when scraping
                 # is finished with write_xlsx
                 # avoid hammering the server
@@ -232,7 +236,12 @@ class MySpider(object):
     def scrape(self):
         for start_url in self.START_URLS:
             for info_page_url in self.get_info_page_urls(start_url):
-                yield from self.get_info_page(info_page_url)
+                # todo: catch error. if self.silence_errors=True just pass a dummy row
+                # else raise exception, then caught by logger
+                try:
+                    yield from self.get_info_page(info_page_url)
+                except Exception as whatever_exception:
+                    raise whatever_exception
         self.cache.close()
         self.geo_cache.close()
         if self.quit_when_finished:
@@ -560,25 +569,36 @@ class HjartatSpider(MySpider):
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
         logger.debug("Kronans Apotek: Hämtar sitemap")
-        new_page, soup = self.make_soup(starting_url, parser="lxml-xml")
         # Apoteket Hjartat seems to have temporary blacklist
         # If you hit any of the sitemap files more than X times per day
         # you will get a 404.
+        # Also,their sitemap is not valid xml. Parsing it as html
+        new_page, soup = self.make_soup(starting_url, parser="lxml-xml")
+        # Since we never hit the starting url twice, we don't need to check
+        # new_page
         locs = soup.find_all("loc")
-        # Their xml is misconfigured. Parsing it as html
         if not locs:
+            # we hit their temporary blacklist
+            # instead we read the last good instance of the sitemap.
             logger.debug(f"{soup.title}")
-            #todo: read from cache, log a warning
-            #read stores_sitemap from cache
+            logger.warning(f"Could not retrieve Hjärtat's sitemap. Using old sitemap")
+            # todo: read from cache, log a warning
+            # read stores_sitemap from cache
             # cache_file_name = cache/hjartat_sitemap.pickle
-            #raise ScrapeFailure(f"Could not find Apoteket Hjärtats sitemap")
+            # raise ScrapeFailure(f"Could not find Apoteket Hjärtats sitemap")
+            # todo: raise exception if still not valid
         else:
-            #todo save sitemap as cache/hjartat_sitemap.pickle
+            # todo save sitemap as cache/hjartat_sitemap.pickle
             pass
 
-        new_page, stores_sitemap = self.make_soup(locs[0].text, parser="lxml") #cache_file_name = cache/hjartat_sitemap.pickle
+        new_page, stores_sitemap = self.make_soup(
+            locs[0].text, parser="lxml"
+        )  # cache_file_name = cache/hjartat_sitemap.pickle
         # logger.debug(stores_sitemap)
         store_list = stores_sitemap.select("loc")
+        if not store_list:
+            # sitemap not available
+            pass  # get soup from hjartat_sitempa.pickle
         no_search_hits = 0
         for loc in store_list:
             store_url = self.url_regex.findall(loc.text)
@@ -729,13 +749,12 @@ class SOAFSpider(MySpider):
             self.driver.quit()
 
 
-
 if __name__ == "__main__":
     # options: firefox profile, output directory, headless,
     # arguments: pharmacy
     arguments = docopt(__doc__, version="skrapa 0.1")
-    #logging
-    logger.add("skrapa.error.log",rotation="1 week",retention="6 week",level="ERROR")
+    # logging
+    logger.add("skrapa.error.log", rotation="1 week", retention="6 week", level="ERROR")
     logger.add("skrapa.info.log", rotation="1 week", retention="6 week", level="INFO")
     # logger.debug(arguments)
     all_modules = {
@@ -774,3 +793,4 @@ if __name__ == "__main__":
                 f"{current_pharmacy}_{datetime.now().isoformat().replace(':', '_')}.xlsx",
             )
         )
+    logger.info("Finished scraping all pharmacies.")
