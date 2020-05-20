@@ -103,6 +103,7 @@ def test_weekday_text_to_int():
 
 
 def get_firefox_profile_path(my_firefox_profile=None):
+    #todo: use pathlib
     if not my_firefox_profile:
         system = platform.system()
         if system == "Darwin":
@@ -622,7 +623,7 @@ class HjartatSpider(MySpider):
             # "cache/hjartat_sitemap.pickle" can be created with
             # the tool misc/extract_hjartat_sitemap_from_cache.py
             # logger.debug(f"{soup.title}")
-            logger.warning(f"Could not retrieve Hjärtat's sitemap. Using old sitemap")
+            logger.error(f"Could not retrieve Hjärtat's sitemap. Using old sitemap")
             new_page, soup = self.make_soup(
                 starting_url, parser="lxml-xml", soup_cache=prev_sitemap_cache
             )
@@ -823,8 +824,18 @@ if __name__ == "__main__":
     # options: firefox profile, output directory, headless,
     # arguments: pharmacy
     arguments = docopt(__doc__, version="skrapa 0.1")
+
+    # create output directory if needed
+    if not arguments["--output"]:
+        output_directory = Path(f"output/{datetime.now().strftime('%Y-W%W')}")
+    else:
+        output_directory = Path(arguments["--output"])
+    if not output_directory.is_dir():
+        output_directory.mkdir(parents=True)
+
     # logging
     logger.add("skrapa.error.log", rotation="1 week", retention="6 week", level="ERROR")
+    logger.add(Path.joinpath(output_directory, Path("error.log")), level="WARNING")
     logger.add("skrapa.info.log", rotation="1 week", retention="6 week", level="INFO")
     # logger.debug(arguments)
 
@@ -846,14 +857,6 @@ if __name__ == "__main__":
         logger.critical(f'{arguments["APOTEK"]} is not a valid Pharmacy Chain')
         sys.exit(1)
 
-    # create output directory if needed
-    if not arguments["--output"]:
-        output_directory = Path(f"output/{datetime.now().strftime('%Y-W%W')}")
-    else:
-        output_directory = Path(arguments["--output"])
-    if not output_directory.is_dir():
-        output_directory.mkdir(parents=True)
-
     # scrape one or all chains
     for current_pharmacy in pharmacies:
         curr_module = all_modules[current_pharmacy](
@@ -867,6 +870,6 @@ if __name__ == "__main__":
                 )
             )
         )
-    logger.info("Finished scraping all pharmacies.")
+    logger.info(f"Finished scraping: {', '.join(pharmacies)}")
     # todo: call external script defined in the .secrets file with the output directory as the first argument
     # todo: add script that sends email
