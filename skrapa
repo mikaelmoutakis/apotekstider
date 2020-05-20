@@ -194,8 +194,8 @@ class MySpider(object):
         # and we need to read from a previous sitemap
         # TODO: add timestamp to each entry in the cache
         if not soup_cache:
-            #soup_cache not set
-            #using standard cache
+            # soup_cache not set
+            # using standard cache
             soup_cache = self.cache
         if url in self.VISITED_PAGES and not soup_cache:
             # already visited page during current session
@@ -208,7 +208,7 @@ class MySpider(object):
             try:
                 # test if page source is already in the cache file
                 page_source = soup_cache[url]
-                logger.info(f"Soup from cache: {url}")
+                logger.info(f"Web page from cache: {url}")
             except KeyError:
                 # url not in cache
                 self.driver.get(url)  # wait condition efter get?
@@ -216,7 +216,7 @@ class MySpider(object):
                 # before returning the whole page
                 if wait_condition:
                     WebDriverWait(self.driver, timeout=15).until(wait_condition)
-                logger.info(f"From net: {url}")
+                logger.info(f"Web page from net: {url}")
                 page_source = self.driver.page_source
                 # add page source to cache
                 soup_cache[url] = page_source
@@ -610,46 +610,64 @@ class HjartatSpider(MySpider):
         # If you hit any of the sitemap files more than X times per day
         # you will get a 404.
         # Also,their sitemap is not valid xml. Parsing it as html
-        new_page, soup = self.make_soup(starting_url, parser="lxml-xml")
-        # Since we never hit the starting url twice, we don't need to check
-        # new_page
+        new_page, main_sitemap = self.make_soup(starting_url, parser="lxml-xml")
+        # Since we never hit the starting url twice,
+        # we don't need to check variable "new_page"
         prev_sitemap_cache = shelve.open("cache/hjartat_sitemap.pickle")
-        locs = soup.find_all("loc")
+        locs = main_sitemap.find_all("loc")
         if not locs:
-            # we hit their temporary blacklist
-            # instead we read the last good instance of the sitemap.
-            logger.debug(f"{soup.title}")
+            # We hit their temporary blacklist and accessed
+            # their 404 page.
+            # Instead we read the last good instance of the sitemap.
+            # "cache/hjartat_sitemap.pickle" can be created with
+            # the tool misc/extract_hjartat_sitemap_from_cache.py
+            # logger.debug(f"{soup.title}")
             logger.warning(f"Could not retrieve Hjärtat's sitemap. Using old sitemap")
-            new_page, soup = self.make_soup(starting_url, parser="lxml-xml",soup_cache=prev_sitemap_cache)
+            new_page, soup = self.make_soup(
+                starting_url, parser="lxml-xml", soup_cache=prev_sitemap_cache
+            )
             locs = soup.find_all("loc")
             if not locs:
-                raise ScrapeFailure(f"Could not retrieve Hjärtat's first sitemap from old sitemap")
-            # todo: read from cache, log a warning
-            # read stores_sitemap from cache
-            # cache_file_name = cache/hjartat_sitemap.pickle
-            # raise ScrapeFailure(f"Could not find Apoteket Hjärtats sitemap")
-            # todo: raise exception if still not valid
+                raise ScrapeFailure(
+                    f"Could not retrieve Hjärtat's first sitemap from old sitemap"
+                )
+            ####################################################
+            # Now we have retrieved the first sitemap,
+            # fresh from the web, from this weeks cache or
+            # from a previous week
+            ###################################################
+            # Now we retrieve the sub-sitemap that has links
+            # to each individual store's webpage
+            ###################################################
+            sub_sitemap_url = locs[0].text
+            print(sub_sitemap_url)
+            new_page, stores_sitemap = self.make_soup(
+                sub_sitemap_url, parser="lxml", soup_cache=prev_sitemap_cache
+            )
         else:
-            # todo save sitemap as cache/hjartat_sitemap.pickle
-            prev_sitemap_cache[starting_url]=soup
+            # Current sitemap is good, save it to "cache/hjartat_sitemap.pickle"
+            prev_sitemap_cache[starting_url] = main_sitemap
             prev_sitemap_cache.sync()
-
-        ####################################################
-        # Now we have retrieved the first sitemap,
-        # fresh from the web, from this weeks cache or
-        # from last weeks cache
-        ###################################################
-        # Now we retrieve the sub-sitemap that has links
-        # to each individual store's webpage
-        ###################################################
-        new_page, stores_sitemap = self.make_soup(
-            locs[0].text, parser="lxml"
-        )
+            ####################################################
+            # Now we have retrieved the first sitemap,
+            # fresh from the web, from this weeks cache or
+            # from a previous week
+            ###################################################
+            # Now we retrieve the sub-sitemap that has links
+            # to each individual store's webpage
+            ###################################################
+            sub_sitemap_url = locs[0].text
+            new_page, stores_sitemap = self.make_soup(sub_sitemap_url, parser="lxml")
+            # We then copy this weeks sub-sitemap
+            # from our regular cache to our extra cache.
+            prev_sitemap_cache[starting_url] = self.cache[starting_url]
+            prev_sitemap_cache[sub_sitemap_url] = self.cache[sub_sitemap_url]
+            prev_sitemap_cache.sync()
         # logger.debug(stores_sitemap)
         store_list = stores_sitemap.select("loc")
-        if not store_list:
-            # sitemap not available
-            pass  # get soup from hjartat_sitempa.pickle
+        ###############################################
+        # Finally, we find and return all store pages #
+        ###############################################
         no_search_hits = 0
         for loc in store_list:
             store_url = self.url_regex.findall(loc.text)
@@ -657,7 +675,8 @@ class HjartatSpider(MySpider):
                 yield loc.text
                 no_search_hits += 1
         if no_search_hits == 0:
-            raise ScrapeFailure(f"Could not find any of Apoteket Hjärtats butikssidor")
+            raise ScrapeFailure(f"Could not find any of Apoteket Hjärtat's stores")
+        prev_sitemap_cache.close()
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
@@ -849,5 +868,5 @@ if __name__ == "__main__":
             )
         )
     logger.info("Finished scraping all pharmacies.")
-    #todo: call external script defined in the .secrets file with the output directory as the first argument
-    #todo: add script that sends email
+    # todo: call external script defined in the .secrets file with the output directory as the first argument
+    # todo: add script that sends email
