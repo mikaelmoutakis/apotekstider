@@ -137,9 +137,14 @@ class MySpider(object):
     VISITED_PAGES = []
 
     def __init__(
-        self, my_firefox_profile=None, quit_when_finished=True, headless=False
+        self,
+        my_firefox_profile=None,
+        quit_when_finished=True,
+        headless=False,
+        ignore_errors_when_parsing_info_page=False,
     ):
         self.quit_when_finished = quit_when_finished
+        self.ignore_errors_when_parsing_info_page = ignore_errors_when_parsing_info_page
         my_firefox_profile = get_firefox_profile_path(my_firefox_profile)
         logger.info(f"Using profile: {my_firefox_profile}")
         # firefox settings
@@ -189,9 +194,14 @@ class MySpider(object):
         # and we need to read from a previous sitemap
         # TODO: add timestamp to each entry in the cache
         if not soup_cache:
+            #soup_cache not set
+            #using standard cache
             soup_cache = self.cache
-        if url in self.VISITED_PAGES:
+        if url in self.VISITED_PAGES and not soup_cache:
             # already visited page during current session
+            # if soup_cache!=None then we should not care about
+            # that we already visited the page, since we might have
+            # failed to retrieve the page from another cache file
             return False, None
         else:
             self.VISITED_PAGES.append(url)
@@ -226,6 +236,7 @@ class MySpider(object):
         table = etl.fromdicts(result)
         etl.toxlsx(table, path)
         self.write_cache()
+        logger.info(f"Finished writing to {path}")
 
     def get_info_page_urls(self, start_url):
         pass
@@ -236,12 +247,38 @@ class MySpider(object):
     def scrape(self):
         for start_url in self.START_URLS:
             for info_page_url in self.get_info_page_urls(start_url):
-                # todo: catch error. if self.silence_errors=True just pass a dummy row
-                # else raise exception, then caught by logger
+                # Catches exceptions when parsing individual store pages
+                # if self.ignore_errors_when_parsing_info_page=True
+                # the program just passes a dummy row to the excel writer,
+                # else it raises the same exception,
+                # which then is caught by logger
                 try:
                     yield from self.get_info_page(info_page_url)
                 except Exception as whatever_exception:
-                    raise whatever_exception
+                    if self.ignore_errors_when_parsing_info_page:
+                        parsing_error_message = "COULD NOT PARSE PAGE"
+                        # todo: add chain name to class variables for each subclass
+                        yield {
+                            "chain": f"**Error in {self.__class__.__name__}",  # todo: replace this
+                            "url": info_page_url,
+                            "store_name": parsing_error_message,
+                            "long": parsing_error_message,
+                            "lat": parsing_error_message,
+                            "address": parsing_error_message,
+                            "zip_code": parsing_error_message,
+                            "city": parsing_error_message,
+                            "datetime": datetime.now().isoformat(),
+                            "weekday": parsing_error_message,
+                            "weekday_no": parsing_error_message,
+                            "hours": parsing_error_message,
+                            "mq_street": parsing_error_message,
+                            "mq_zip_code": parsing_error_message,
+                            "mq_lat": parsing_error_message,
+                            "mq_long": parsing_error_message,
+                        }
+                        logger.error(f"Could note parse page {info_page_url}")
+                    else:
+                        raise whatever_exception
         self.cache.close()
         self.geo_cache.close()
         if self.quit_when_finished:
@@ -576,12 +613,17 @@ class HjartatSpider(MySpider):
         new_page, soup = self.make_soup(starting_url, parser="lxml-xml")
         # Since we never hit the starting url twice, we don't need to check
         # new_page
+        prev_sitemap_cache = shelve.open("cache/hjartat_sitemap.pickle")
         locs = soup.find_all("loc")
         if not locs:
             # we hit their temporary blacklist
             # instead we read the last good instance of the sitemap.
             logger.debug(f"{soup.title}")
             logger.warning(f"Could not retrieve Hjärtat's sitemap. Using old sitemap")
+            new_page, soup = self.make_soup(starting_url, parser="lxml-xml",soup_cache=prev_sitemap_cache)
+            locs = soup.find_all("loc")
+            if not locs:
+                raise ScrapeFailure(f"Could not retrieve Hjärtat's first sitemap from old sitemap")
             # todo: read from cache, log a warning
             # read stores_sitemap from cache
             # cache_file_name = cache/hjartat_sitemap.pickle
@@ -589,11 +631,20 @@ class HjartatSpider(MySpider):
             # todo: raise exception if still not valid
         else:
             # todo save sitemap as cache/hjartat_sitemap.pickle
-            pass
+            prev_sitemap_cache[starting_url]=soup
+            prev_sitemap_cache.sync()
 
+        ####################################################
+        # Now we have retrieved the first sitemap,
+        # fresh from the web, from this weeks cache or
+        # from last weeks cache
+        ###################################################
+        # Now we retrieve the sub-sitemap that has links
+        # to each individual store's webpage
+        ###################################################
         new_page, stores_sitemap = self.make_soup(
             locs[0].text, parser="lxml"
-        )  # cache_file_name = cache/hjartat_sitemap.pickle
+        )
         # logger.debug(stores_sitemap)
         store_list = stores_sitemap.select("loc")
         if not store_list:
@@ -757,6 +808,8 @@ if __name__ == "__main__":
     logger.add("skrapa.error.log", rotation="1 week", retention="6 week", level="ERROR")
     logger.add("skrapa.info.log", rotation="1 week", retention="6 week", level="INFO")
     # logger.debug(arguments)
+
+    # case-when-switch for which module to run
     all_modules = {
         "apoteksgruppen": ApoteksgruppenSpider,
         "apoteket": ApoteketSpider,
@@ -774,23 +827,27 @@ if __name__ == "__main__":
         logger.critical(f'{arguments["APOTEK"]} is not a valid Pharmacy Chain')
         sys.exit(1)
 
-    # scrape one or many pharmacy chain
+    # create output directory if needed
     if not arguments["--output"]:
-        output_directory = "output"
+        output_directory = Path(f"output/{datetime.now().strftime('%Y-W%W')}")
     else:
-        output_directory = arguments["--output"]
+        output_directory = Path(arguments["--output"])
+    if not output_directory.is_dir():
+        output_directory.mkdir(parents=True)
 
     # scrape one or all chains
     for current_pharmacy in pharmacies:
-        if not os.path.isdir(output_directory):
-            os.mkdir(output_directory)
         curr_module = all_modules[current_pharmacy](
             my_firefox_profile=arguments["--profile"], headless=arguments["--headless"]
         )
         curr_module.write_xlsx(
-            os.path.join(
-                output_directory,
-                f"{current_pharmacy}_{datetime.now().isoformat().replace(':', '_')}.xlsx",
+            str(
+                Path.joinpath(
+                    output_directory,
+                    f"{current_pharmacy}_{datetime.now().isoformat().replace(':', '_')}.xlsx",
+                )
             )
         )
     logger.info("Finished scraping all pharmacies.")
+    #todo: call external script defined in the .secrets file with the output directory as the first argument
+    #todo: add script that sends email

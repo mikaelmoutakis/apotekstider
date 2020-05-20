@@ -7,3 +7,4 @@ __pycache__
 output/*
 #ddd
 *.pickle
+.DS_Store
