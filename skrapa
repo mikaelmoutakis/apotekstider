@@ -1,29 +1,34 @@
 #!/usr/bin/env python3
-"""Scrape Swedish pharmacies for opening hours.
+"""
+Description:
+    Scrapes Swedish pharmacies for opening hours.
 
 Usage:
-  skrapa [--output=<dir>] [--headless] [--profile=<profile>] APOTEK
-  skrapa (-h | --help)
+    skrapa [options] APOTEK
+    skrapa (-h | --help)
 
 Options:
-  -h --help                             Show this screen.
-  --profile=<profile>                   Path to Firefox profile
-  --output=<dir>                        Output directory
-  --headless                            Run Firefox headless
+    -h,--help                             Show this screen.
+    --profile=<profile>                   Path to Firefox profile
+    --output=<dir>                        Output directory
+    --headless                            Run Firefox headless
+    -s,--suppress-errors                  Suppresses parsing errors
+    --exec=<cmd>                          Executes <cmd> after finishing scraping
+    --keep-open                           Keeps FireFox open after scraping
 
+Description:
+    A set of scripts for retrieving opening hours from all the major pharmacy chains in Sweden.
 
-A set of scripts for retrieving opening hours from all the major pharmacy chains in Sweden.
+    APOTEK = (ALLA|apoteksgruppen|apoteket|lloyds|kronans|hjartat|soaf)
 
-APOTEK = (ALLA|apoteksgruppen|apoteket|lloyds|kronans|hjartat|soaf)
+    Requires Firefox with the geckoengine driver, python 3.5 or later, and a API key for MapQuest.
+    Before running this program, you need to create text file called ".secrets"
+    in the same folder as this README document. The content should look like this:
 
-Requires Firefox with the geckoengine driver, python 3.5 or later, and a API key for MapQuest.
-Before running this program, you need to create text file called ".secrets"
-in the same folder as this README document. The content should look like this:
+        [mapquest]
+        key = <your long api key here>
 
-[mapquest]
-key = <your long api key here>
-
-Then, you need to start Firefox and set it to block location requests.
+    Then, you need to start Firefox and set it to block location requests.
 """
 
 from docopt import docopt
@@ -45,7 +50,7 @@ import platform
 import configparser
 from pathlib import Path
 from loguru import logger
-
+import subprocess
 
 WEEKDAYS = {
     "måndag": "1",
@@ -103,7 +108,7 @@ def test_weekday_text_to_int():
 
 
 def get_firefox_profile_path(my_firefox_profile=None):
-    #todo: use pathlib
+    # todo: use pathlib
     if not my_firefox_profile:
         system = platform.system()
         if system == "Darwin":
@@ -860,7 +865,10 @@ if __name__ == "__main__":
     # scrape one or all chains
     for current_pharmacy in pharmacies:
         curr_module = all_modules[current_pharmacy](
-            my_firefox_profile=arguments["--profile"], headless=arguments["--headless"]
+            my_firefox_profile=arguments["--profile"],
+            headless=arguments["--headless"],
+            quit_when_finished=not arguments["--keep-open"], #False -> True
+            ignore_errors_when_parsing_info_page=arguments["--suppress-errors"],
         )
         curr_module.write_xlsx(
             str(
@@ -871,5 +879,10 @@ if __name__ == "__main__":
             )
         )
     logger.info(f"Finished scraping: {', '.join(pharmacies)}")
-    # todo: call external script defined in the .secrets file with the output directory as the first argument
-    # todo: add script that sends email
+    if arguments["--exec"]:
+        cmd = arguments["--exec"]
+        logger.info(f"Running cmd {cmd}")
+        end_task = subprocess.run(cmd, shell=True, capture_output=True)
+        if end_task.returncode > 0:
+            subprocess_errors = end_task.stderr.decode("utf-8").strip()
+            logger.error(f"{cmd} exited with non-zero status. {subprocess_errors}")

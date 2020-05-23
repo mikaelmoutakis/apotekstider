@@ -1,4 +1,32 @@
 #!/usr/bin/env python3
+"""
+USAGE:
+    ./misc/send_output_files_with_email.py <directory>
+    ./misc/send_output_files_with_email.py -h|--help
+
+OPTIONS:
+    -h,--help      Help
+
+DESCRIPTION:
+    Sends the xlsx files in output <directory> to the email adresses listed in the .secrets file.
+    The 'error.log' file in <directory> is appended to the message body.
+
+CONFIGURATION:
+    Append the following text to the '.secrets' config file.
+
+        [email]
+        username = <sender_email>
+        password = <email password>
+        smtp = <smtp url, eg smtp.gmail.com>
+        port = 587
+        from = <sender_email>
+        recipients = <recipient1>,<recipient2>,...
+        subject = <subject line text>
+        message = <message body>
+
+    Replace placeholder text like <x> with the correct information.
+"""
+
 # send path/to/output/folder
 # loop over items in folder
 
@@ -14,6 +42,7 @@ from email import encoders
 # configs
 import configparser
 import sys
+from docopt import docopt
 
 
 def send_mail(
@@ -46,7 +75,7 @@ def send_mail(
     """
     msg = MIMEMultipart()
     msg["From"] = send_from
-    msg["To"] = send_to
+    msg["To"] = ",".join(send_to)
     msg["Date"] = formatdate(localtime=True)
     msg["Subject"] = subject
 
@@ -71,18 +100,24 @@ def send_mail(
 
 
 if __name__ == "__main__":
+    arguments = docopt(__doc__)
     secrets = configparser.ConfigParser()
     secrets.read(".secrets")
     conf = secrets["email"]
-    folder_to_send = Path(sys.argv[1])
+    folder_to_send = Path(arguments["<directory>"])
     if not folder_to_send.is_dir():
         raise FileNotFoundError(f"{folder_to_send} is not a valid directory")
     else:
+        with Path.joinpath(folder_to_send, "error.log") as el:
+            errors_text = el.read_text()
+        divider_text = "\n" * 2 + "#" * 40 + "\n" + "Errors:" + "\n" + "#" * 40 + "\n"
+        message_text = conf["message"] + divider_text + errors_text
+        send_to = conf["recipients"].split(",")
         send_mail(
             send_from=conf["from"],
-            send_to=conf["recipients"],
+            send_to=send_to,
             subject=conf["subject"],
-            message=conf["message"],
+            message=message_text,
             files=folder_to_send.glob("*.xlsx"),
             server=conf["smtp"],
             port=int(conf["port"]),
