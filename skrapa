@@ -276,7 +276,7 @@ class MySpider(object):
                         parsing_error_message = "COULD NOT PARSE PAGE"
                         # todo: add chain name to class variables for each subclass
                         yield {
-                            "chain": f"**Error in {self.__class__.__name__}",  # todo: replace this
+                            "chain": self.__class__.__name__,  # todo: replace this
                             "url": info_page_url,
                             "store_name": parsing_error_message,
                             "long": parsing_error_message,
@@ -345,7 +345,7 @@ class ApoteksgruppenSpider(MySpider):
                 # todo: add long and lat
                 # todo: is there not a zip code?
                 yield {
-                    "chain": "Apoteksgruppen",
+                    "chain": self.__class__.__name__,
                     "url": url,
                     "store_name": store_name,
                     "long": "",
@@ -433,7 +433,7 @@ class ApoteketSpider(MySpider):
                 hours = day.select("span.time")[0].string.strip()
                 weekday_no = weekday_text_to_int(weekday)
                 yield {
-                    "chain": "Apoteket AB",
+                    "chain": self.__class__.__name__,
                     "url": url,
                     "store_name": store_name,
                     "long": long,
@@ -512,7 +512,7 @@ class LloydsSpider(MySpider):
                 weekday, *hours = day.split(":")
                 weekday_no = weekday_text_to_int(weekday)
                 yield {
-                    "chain": "Lloyds Apotek",
+                    "chain": self.__class__.__name__,
                     "url": url,
                     "store_name": store_name,
                     "long": long,
@@ -594,7 +594,7 @@ class KronansApotekSpider(MySpider):
                 for weekday, hours in zip(days, opening_hours):
                     weekday_no = weekday_text_to_int(weekday.text)
                     yield {
-                        "chain": "Kronans Apotek",
+                        "chain": self.__class__.__name__,
                         "url": url,
                         "store_name": store_name,
                         "long": long,
@@ -742,7 +742,7 @@ class HjartatSpider(MySpider):
                 for weekday, hours in opening_hours:
                     weekday_no = weekday_text_to_int(weekday)
                     yield {
-                        "chain": "Apoteket Hjärtat",
+                        "chain": self.__class__.__name__,
                         "url": url,
                         "store_name": store_name,
                         "long": long,
@@ -811,7 +811,7 @@ class SOAFSpider(MySpider):
                         weekday_no = weekday_text_to_int(weekday)
                         zip_code = " "
                         yield {
-                            "chain": "SOAF",
+                            "chain": self.__class__.__name__,
                             "url": url,
                             "store_name": store_name,
                             "long": "",
@@ -839,7 +839,7 @@ class SOAFSpider(MySpider):
 if __name__ == "__main__":
     # options: firefox profile, output directory, headless,
     # arguments: pharmacy
-    arguments = docopt(__doc__, version="skrapa 0.1")
+    arguments = docopt(__doc__, version="skrapa 0.2")
 
     # create output directory if needed
     if not arguments["--output"]:
@@ -878,7 +878,7 @@ if __name__ == "__main__":
         curr_module = all_modules[current_pharmacy](
             my_firefox_profile=arguments["--profile"],
             headless=arguments["--headless"],
-            quit_when_finished=not arguments["--keep-open"], #False -> True
+            quit_when_finished=not arguments["--keep-open"],  # False -> True
             ignore_errors_when_parsing_info_page=arguments["--suppress-errors"],
         )
         curr_module.write_xlsx(
