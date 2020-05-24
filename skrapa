@@ -13,7 +13,7 @@ Options:
     --output=<dir>                        Output directory
     --headless                            Run Firefox headless
     -s,--suppress-errors                  Suppresses parsing errors
-    --exec=<cmd>                          Executes <cmd> after finishing scraping
+    --exec=<cmd>                          Executes <cmd>+output_directory, e.g. 'foo {}', after finishing scraping.
     --keep-open                           Keeps FireFox open after scraping
 
 Description:
@@ -891,7 +891,8 @@ if __name__ == "__main__":
         )
     logger.info(f"Finished scraping: {', '.join(pharmacies)}")
     if arguments["--exec"]:
-        cmd = arguments["--exec"]
+        #e.g ./misc/send_output_files_with_email.py output/2020-W20
+        cmd = arguments["--exec"].format(output_directory)
         logger.info(f"Running cmd {cmd}")
         end_task = subprocess.run(cmd, shell=True, capture_output=True)
         if end_task.returncode > 0:
