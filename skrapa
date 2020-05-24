@@ -61,6 +61,20 @@ WEEKDAYS = {
     "lördag": "6",
     "söndag": "7",
     "mån-fre": "1,2,3,4,5",
+    "må":"1",
+    "ti":"2",
+    "on":"3",
+    "to":"4",
+    "fr":"5",
+    "lö":"6",
+    "sö":"7",
+    "lördag-söndag":"6,7",
+    "måndag-tisdag":"1,2",
+    "måndag-onsdag":"1,2,3",
+    "måndag-torsdag":"1,2,3,4",
+    "måndag-fredag":"1,2,3,4,5",
+    "måndag-lördag":"1,2,3,4,5,6",
+    "måndag-söndag":"1,2,3,4,5,6,7",
 }
 
 
@@ -90,21 +104,18 @@ def weekday_text_to_int(txt, weekdaynow=None):
 
 
 def test_weekday_text_to_int():
-    examples = [
-        "Öppet idag ",
-        " imorgon",
-        "Fredag",
-        "Lördag",
-        "söndag",
-        "måndag",
-        "tisdag",
-        "onsdag",
-        "torsdag",
-        "blaha",
-    ]
-    correct_output = ["3", "4", "5", "6", "7", "1", "2", "3", "4", None]
-    output = [weekday_text_to_int(x, 3) for x in examples]
-    assert output == correct_output
+    examples1 = {
+        "Öppet idag ":"3",
+        " imorgon":"4",
+        "blaha": None
+    }
+    output1 = {key: weekday_text_to_int(key, 3) for key in examples1}
+    assert output1 == examples1
+    output2 = {key: weekday_text_to_int(key, 3) for key in WEEKDAYS}
+    assert output2 == WEEKDAYS
+    output3 = {key: weekday_text_to_int(key.capitalize()+" ", 3) for key in WEEKDAYS}
+    assert output3 == WEEKDAYS
+
 
 
 def get_firefox_profile_path(my_firefox_profile=None):
