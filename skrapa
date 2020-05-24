@@ -855,7 +855,7 @@ if __name__ == "__main__":
     logger.add("skrapa.info.log", rotation="1 week", retention="6 week", level="INFO")
     # logger.debug(arguments)
 
-    # case-when-switch for which module to run
+    # case-then-switch for which module to run
     all_modules = {
         "apoteksgruppen": ApoteksgruppenSpider,
         "apoteket": ApoteketSpider,
