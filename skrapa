@@ -10,7 +10,8 @@ Usage:
 Options:
     -h,--help                             Show this screen.
     --profile=<profile>                   Path to Firefox profile
-    --output=<dir>                        Output directory
+    --output=<dir>                        Output directory [default: output]
+    --cache=<dir>                         Cache directory [default: cache]
     --headless                            Run Firefox headless
     -s,--suppress-errors                  Suppresses parsing errors
     --exec=<cmd>                          Executes <cmd>+output_directory, e.g. 'foo {}', after finishing scraping.
@@ -41,9 +42,6 @@ import time
 from datetime import datetime
 import petl as etl
 import re
-import os
-import os.path
-import glob
 import shelve
 import requests
 import platform
@@ -61,20 +59,20 @@ WEEKDAYS = {
     "lördag": "6",
     "söndag": "7",
     "mån-fre": "1,2,3,4,5",
-    "må":"1",
-    "ti":"2",
-    "on":"3",
-    "to":"4",
-    "fr":"5",
-    "lö":"6",
-    "sö":"7",
-    "lördag-söndag":"6,7",
-    "måndag-tisdag":"1,2",
-    "måndag-onsdag":"1,2,3",
-    "måndag-torsdag":"1,2,3,4",
-    "måndag-fredag":"1,2,3,4,5",
-    "måndag-lördag":"1,2,3,4,5,6",
-    "måndag-söndag":"1,2,3,4,5,6,7",
+    "må": "1",
+    "ti": "2",
+    "on": "3",
+    "to": "4",
+    "fr": "5",
+    "lö": "6",
+    "sö": "7",
+    "lördag-söndag": "6,7",
+    "måndag-tisdag": "1,2",
+    "måndag-onsdag": "1,2,3",
+    "måndag-torsdag": "1,2,3,4",
+    "måndag-fredag": "1,2,3,4,5",
+    "måndag-lördag": "1,2,3,4,5,6",
+    "måndag-söndag": "1,2,3,4,5,6,7",
 }
 
 
@@ -104,43 +102,31 @@ def weekday_text_to_int(txt, weekdaynow=None):
 
 
 def test_weekday_text_to_int():
-    examples1 = {
-        "Öppet idag ":"3",
-        " imorgon":"4",
-        "blaha": None
-    }
+    examples1 = {"Öppet idag ": "3", " imorgon": "4", "blaha": None}
     output1 = {key: weekday_text_to_int(key, 3) for key in examples1}
     assert output1 == examples1
     output2 = {key: weekday_text_to_int(key, 3) for key in WEEKDAYS}
     assert output2 == WEEKDAYS
-    output3 = {key: weekday_text_to_int(key.capitalize()+" ", 3) for key in WEEKDAYS}
+    output3 = {key: weekday_text_to_int(key.capitalize() + " ", 3) for key in WEEKDAYS}
     assert output3 == WEEKDAYS
 
 
-
 def get_firefox_profile_path(my_firefox_profile=None):
-    # todo: use pathlib
     if not my_firefox_profile:
         system = platform.system()
-        if system == "Darwin":
-            profile_home = os.path.expanduser(
-                "~/Library/Application Support/Firefox/Profiles"
-            )
-            profile_path = glob.glob(os.path.join(profile_home, "*.default"))[0]
-            raise NotImplementedError("OS X not supported, yet.")
+        if system == "Linux":
+            my_firefox_profile ="~/.mozilla/firefox/"
 
-        elif system == "Linux":
-            profile_home = os.path.expanduser("~/.mozilla/firefox/")
-            profile_path = glob.glob(os.path.join(profile_home, "*.default*"))[0]
-            return profile_path
-        elif system == "Windows":
+        else:
             raise NotImplementedError(
-                "Windows not supported. Please see https://tinyurl.com/y4uey2eo"
+                "Your system is not supported. Please see https://tinyurl.com/y4uey2eo"
             )
-    else:
-        profile_home = os.path.expanduser(my_firefox_profile)
-        profile_path = glob.glob(os.path.join(profile_home, "*.default*"))[0]
-        return profile_path
+    profile_home = Path(my_firefox_profile).expanduser()
+    try:
+        profile_path = list(profile_home.glob("*.default*"))[0]
+    except IndexError:
+        raise FileNotFoundError(f"Could not find path to FireFox profile: '{profile_home}'")
+    return profile_path
 
 
 class ScrapeFailure(Exception):
@@ -155,6 +141,7 @@ class MySpider(object):
 
     def __init__(
         self,
+        cache_parent_directory,
         my_firefox_profile=None,
         quit_when_finished=True,
         headless=False,
@@ -170,11 +157,18 @@ class MySpider(object):
         self.profile = webdriver.FirefoxProfile(my_firefox_profile)
         self.driver = webdriver.Firefox(self.profile, options=options)
         # caching
-        cache_dir = Path(f"cache/{datetime.now().strftime('%Y-W%W')}")
+        self.cache_parent_directory = Path(cache_parent_directory)
+        cache_dir = Path.joinpath(
+            self.cache_parent_directory, Path(f"{datetime.now().strftime('%Y-W%W')})")
+        )
         if not cache_dir.is_dir():
             cache_dir.mkdir(parents=True)
-        self.cache = shelve.open(f"{cache_dir}/{self.__class__.__name__}.pickle")
-        self.geo_cache = shelve.open("cache/geocache.pickle")
+        self.cache = shelve.open(
+            str(Path.joinpath(cache_dir, Path(f"{self.__class__.__name__}.pickle")))
+        )
+        self.geo_cache = shelve.open(
+            str(Path.joinpath(self.cache_parent_directory, "geocache.pickle"))
+        )
         self.secrets = configparser.ConfigParser()
         self.secrets.read(".secrets")
         logger.info(f"Running {self.__class__.__name__}")
@@ -630,7 +624,9 @@ class HjartatSpider(MySpider):
         new_page, main_sitemap = self.make_soup(starting_url, parser="lxml-xml")
         # Since we never hit the starting url twice,
         # we don't need to check variable "new_page"
-        prev_sitemap_cache = shelve.open("cache/hjartat_sitemap.pickle")
+        prev_sitemap_cache = shelve.open(
+            str(Path.joinpath(self.cache_parent_directory, "hjartat_sitemap.pickle"))
+        )
         locs = main_sitemap.find_all("loc")
         if not locs:
             # We hit their temporary blacklist and accessed
@@ -843,9 +839,13 @@ if __name__ == "__main__":
 
     # create output directory if needed
     if not arguments["--output"]:
-        output_directory = Path(f"output/{datetime.now().strftime('%Y-W%W')}")
+        output_directory = Path.joinpath(
+            Path("output"), Path(f"{datetime.now().strftime('%Y-W%W')}")
+        )
     else:
-        output_directory = Path(arguments["--output"])
+        output_directory = Path.joinpath(
+            Path(arguments["--output"]), Path(f"{datetime.now().strftime('%Y-W%W')}")
+        )
     if not output_directory.is_dir():
         output_directory.mkdir(parents=True)
 
@@ -876,6 +876,7 @@ if __name__ == "__main__":
     # scrape one or all chains
     for current_pharmacy in pharmacies:
         curr_module = all_modules[current_pharmacy](
+            cache_parent_directory=arguments["--cache"],
             my_firefox_profile=arguments["--profile"],
             headless=arguments["--headless"],
             quit_when_finished=not arguments["--keep-open"],  # False -> True
@@ -891,7 +892,7 @@ if __name__ == "__main__":
         )
     logger.info(f"Finished scraping: {', '.join(pharmacies)}")
     if arguments["--exec"]:
-        #e.g ./misc/send_output_files_with_email.py output/2020-W20
+        # e.g ./misc/send_output_files_with_email.py output/2020-W20
         cmd = arguments["--exec"].format(output_directory)
         logger.info(f"Running cmd {cmd}")
         end_task = subprocess.run(cmd, shell=True, capture_output=True)
