@@ -78,8 +78,6 @@ WEEKDAYS = {
 
 def weekday_text_to_int(txt, weekdaynow=None):
     """Returns 1 for Monday, 2 for Tuesday etc"""
-    # todo: fixa funktion för "måndag - fredag" mm
-    # todo: fixa funktion för "Lördag (idag)". tex genom att välja första ordet (splitta med mellanslag)
     if weekdaynow is None:
         # weekdaynow=X is used for testing
         weekdaynow = datetime.now().isoweekday()
