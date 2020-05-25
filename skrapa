@@ -792,7 +792,6 @@ class SOAFSpider(MySpider):
                     "lördag",
                     "söndag",
                 ]
-                # todo: geocode address
                 if "Kontakt:" not in store_name:
                     # skips the box with SOAFs contact info
                     # mapquest
