@@ -16,6 +16,7 @@ Options:
     -s,--suppress-errors                  Suppresses parsing errors
     --exec=<cmd>                          Executes <cmd>+output_directory, e.g. 'foo {}', after finishing scraping.
     --keep-open                           Keeps FireFox open after scraping
+    --export-cache=<dir>                  Exports the cache to separate text files in <dir>
 
 Description:
     A set of scripts for retrieving opening hours from all the major pharmacy chains in Sweden.
@@ -144,6 +145,7 @@ class MySpider(object):
         quit_when_finished=True,
         headless=False,
         ignore_errors_when_parsing_info_page=False,
+        export_cache_to_directory = None
     ):
         self.quit_when_finished = quit_when_finished
         self.ignore_errors_when_parsing_info_page = ignore_errors_when_parsing_info_page
@@ -170,6 +172,7 @@ class MySpider(object):
         self.secrets = configparser.ConfigParser()
         self.secrets.read(".secrets")
         logger.info(f"Running {self.__class__.__name__}")
+        self.export_directory = export_cache_to_directory
 
     def address_to_long_lat(self, address_string):
         # check cache
@@ -236,16 +239,33 @@ class MySpider(object):
                 time.sleep(self.WAIT_TIME)
             return True, BeautifulSoup(page_source, parser)
 
+    def export_cache(self, export_directory):
+        output = Path(export_directory)
+        if not output.is_dir():
+            output.mkdir(parents=True)
+        for key in self.cache:
+            try:
+                soup = BeautifulSoup(self.cache[key])
+                file_name = soup.title.text + ".txt"
+                path = Path.joinpath(output, file_name)
+                with open(path, "w") as page:
+                    logger.info(f"Exporting to {file_name}")
+                    page.write(soup.body.text)
+            except AttributeError:
+                logger.warning(f"Could not export {key}, has no title")
+
     def write_cache(self):
+        if self.export_directory:
+            self.export_cache(self.export_directory)
         self.cache.close()
+        self.geo_cache.close()
 
     @logger.catch()
     def write_xlsx(self, path):
         result = self.scrape()
         table = etl.fromdicts(result)
         etl.toxlsx(table, path)
-        self.write_cache()
-        logger.info(f"Finished writing to {path}")
+        logger.info(f"Wrote result to {path}")
 
     def get_info_page_urls(self, start_url):
         pass
@@ -288,10 +308,9 @@ class MySpider(object):
                         logger.error(f"Could note parse page {info_page_url}")
                     else:
                         raise whatever_exception
-        self.cache.close()
-        self.geo_cache.close()
         if self.quit_when_finished:
             self.driver.quit()
+        self.write_cache()
 
 
 class ApoteksgruppenSpider(MySpider):

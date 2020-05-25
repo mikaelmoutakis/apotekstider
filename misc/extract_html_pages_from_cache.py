@@ -1,32 +1,41 @@
 #!/usr/bin/env python3
 """
-USAGE:
-    ./misc/extract_html_pages_from_cache.py <cache_file> <output_directory>
-    ./misc/send_output_files_with_email.py -h|--help
+Usage:
+    ./misc/extract_html_pages_from_cache.py [options] <cache_file> <output_directory>
 
-OPTIONS:
+Options:
     -h,--help      Help
 
-DESCRIPTION:
+Description:
     Extracts the html pages in a .pickle cache file.
+
 """
 
 # configs
 from docopt import docopt
 from pathlib import Path
 import shelve
+from bs4 import BeautifulSoup
 
 def main(cache_file,output_directory):
     output = Path(output_directory)
     with shelve.open(cache_file) as cache:
         for key in cache:
-            file_name = key.replace("https","")
-            with open(file_name,"ws") as page:
-                page.write(cache[key])
+            try:
+                soup = BeautifulSoup(cache[key])
+                file_name = soup.title.text + ".txt"
+                path = Path.joinpath(output,file_name)
+                with open(path,"w") as page:
+                    print(file_name)
+                    page.write(soup.body.text)
+            except AttributeError:
+                print(f"{key} has no title")
 
 
 if __name__=="__main__":
-    pass
+    arguments = docopt(__doc__)
+    #print(arguments)
+    main(arguments["<cache_file>"],arguments["<output_directory>"])
 
 
 
