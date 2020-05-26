@@ -172,7 +172,7 @@ class MySpider(object):
         self.secrets = configparser.ConfigParser()
         self.secrets.read(".secrets")
         logger.info(f"Running {self.__class__.__name__}")
-        self.export_directory = export_cache_to_directory
+        self.export_cache_directory = export_cache_to_directory
 
     def address_to_long_lat(self, address_string):
         # check cache
@@ -239,8 +239,9 @@ class MySpider(object):
                 time.sleep(self.WAIT_TIME)
             return True, BeautifulSoup(page_source, parser)
 
-    def export_cache(self, export_directory):
-        output = Path(export_directory)
+    def export_cache(self, export_cache_directory):
+        subdirectory = Path(datetime.now().strftime("%Y-W%V"))
+        output = Path.joinpath(Path(export_cache_directory),subdirectory)
         if not output.is_dir():
             output.mkdir(parents=True)
         for key in self.cache:
@@ -255,8 +256,8 @@ class MySpider(object):
                 logger.warning(f"Could not export {key}, has no title")
 
     def write_cache(self):
-        if self.export_directory:
-            self.export_cache(self.export_directory)
+        if self.export_cache_directory:
+            self.export_cache(self.export_cache_directory)
         self.cache.close()
         self.geo_cache.close()
 
@@ -891,12 +892,14 @@ if __name__ == "__main__":
 
     # scrape one or all chains
     for current_pharmacy in pharmacies:
+        #todo: add code for exporting cache
         curr_module = all_modules[current_pharmacy](
             cache_parent_directory=arguments["--cache"],
             my_firefox_profile=arguments["--profile"],
             headless=arguments["--headless"],
             quit_when_finished=not arguments["--keep-open"],  # False -> True
             ignore_errors_when_parsing_info_page=arguments["--suppress-errors"],
+            export_cache_to_directory = arguments["--export-cache"]
         )
         curr_module.write_xlsx(
             str(
