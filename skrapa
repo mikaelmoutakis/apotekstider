@@ -233,13 +233,11 @@ class MySpider(object):
                     try:
                         WebDriverWait(self.driver, timeout=15).until(wait_condition)
                     except TimeoutException:
-                        #Waited for an element that never showed up
+                        # Waited for an element that never showed up
                         logger.error(
                             f"TimeoutException: The html part we waited for never showed up in {url}"
                         )
-                        logger.error(
-                            f"Could not retrieve {url}"
-                        )
+                        logger.error(f"Could not retrieve {url}")
                         return False, None
                 logger.info(f"Web page from net: {url}")
                 page_source = self.driver.page_source
@@ -929,7 +927,13 @@ if __name__ == "__main__":
     logger.info(f"Finished scraping: {', '.join(pharmacies)}")
     if arguments["--exec"]:
         # e.g ./misc/send_output_files_with_email.py output/2020-W20
-        cmd = arguments["--exec"].format(output_directory)
+        if arguments["--export-cache"]:
+            path_to_cache = Path.joinpath(
+                Path(arguments["--export-cache"]), output_directory.name
+            )
+            cmd = arguments["--exec"].format(path_to_cache, output_directory)
+        else:
+            cmd = arguments["--exec"].format(output_directory)
         logger.info(f"Running cmd {cmd}")
         end_task = subprocess.run(cmd, shell=True, capture_output=True)
         if end_task.returncode > 0:

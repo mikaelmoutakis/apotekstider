@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 USAGE:
-    ./misc/send_output_files_with_email.py <directory>
-    ./misc/send_output_files_with_email.py -h|--help
+    ./misc/send_output_files_with_email.py [options] <directory>
 
 OPTIONS:
-    -h,--help      Help
+    -h,--help                   Help
+    --export-cache=<dir>        Includes the downloaded html text files in <dir> as zipped archive
 
 DESCRIPTION:
     Sends the xlsx files in output <directory> to the email adresses listed in the .secrets file.
@@ -32,7 +32,6 @@ CONFIGURATION:
 
 # email
 import smtplib
-from pathlib import Path
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
@@ -41,8 +40,11 @@ from email import encoders
 
 # configs
 import configparser
-import sys
 from docopt import docopt
+
+# files
+from pathlib import Path
+import shutil
 
 
 def send_mail(
@@ -108,6 +110,19 @@ if __name__ == "__main__":
     if not folder_to_send.is_dir():
         raise FileNotFoundError(f"{folder_to_send} is not a valid directory")
     else:
+        files_to_send = list(folder_to_send.glob("*.xlsx"))
+        if arguments["--export-cache"]:
+            exported_cache_dir = Path(arguments["--export-cache"])
+            if exported_cache_dir.is_dir():
+                zip_file = shutil.make_archive(
+                    exported_cache_dir, "zip", exported_cache_dir
+                )
+                files_to_send.append(zip_file)
+            else:
+                raise FileNotFoundError(
+                    f"{exported_cache_dir} is not a valid directory"
+                )
+
         with Path.joinpath(folder_to_send, "error.log") as el:
             errors_text = el.read_text()
         divider_text = "\n" * 2 + "#" * 40 + "\n" + "Errors:" + "\n" + "#" * 40 + "\n"
@@ -118,7 +133,7 @@ if __name__ == "__main__":
             send_to=send_to,
             subject=conf["subject"],
             message=message_text,
-            files=folder_to_send.glob("*.xlsx"),
+            files=files_to_send,
             server=conf["smtp"],
             port=int(conf["port"]),
             username=conf["username"],
