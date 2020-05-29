@@ -162,7 +162,7 @@ class MySpider(object):
         # caching
         self.cache_parent_directory = Path(cache_parent_directory)
         cache_dir = Path.joinpath(
-            self.cache_parent_directory, Path(f"{datetime.now().strftime('%Y-W%V')}")
+            self.cache_parent_directory, Path(f"{datetime.now().strftime('%G-%m-%d')}")
         )
         if not cache_dir.is_dir():
             cache_dir.mkdir(parents=True)
@@ -872,11 +872,11 @@ if __name__ == "__main__":
     # create output directory if needed
     if not arguments["--output"]:
         output_directory = Path.joinpath(
-            Path("output"), Path(f"{datetime.now().strftime('%Y-W%V')}")
+            Path("output"), Path(f"{datetime.now().strftime('%G-%m-%d')}")
         )
     else:
         output_directory = Path.joinpath(
-            Path(arguments["--output"]), Path(f"{datetime.now().strftime('%Y-W%V')}")
+            Path(arguments["--output"]), Path(f"{datetime.now().strftime('%G-%m-%d')}")
         )
     if not output_directory.is_dir():
         output_directory.mkdir(parents=True)
@@ -907,7 +907,6 @@ if __name__ == "__main__":
 
     # scrape one or all chains
     for current_pharmacy in pharmacies:
-        # todo: add code for exporting cache
         curr_module = all_modules[current_pharmacy](
             cache_parent_directory=arguments["--cache"],
             my_firefox_profile=arguments["--profile"],
@@ -929,6 +928,7 @@ if __name__ == "__main__":
         # e.g ./misc/send_output_files_with_email.py output/2020-W20
         if arguments["--export-cache"]:
             path_to_cache = Path.joinpath(
+                #eg: ../exported-cache             2020-01-04
                 Path(arguments["--export-cache"]), output_directory.name
             )
             cmd = arguments["--exec"].format(path_to_cache, output_directory)
