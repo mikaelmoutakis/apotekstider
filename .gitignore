@@ -9,3 +9,4 @@ output/*
 *.pickle
 .DS_Store
 experimentsidor/*
+*.pyc
