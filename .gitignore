@@ -2,6 +2,7 @@ cache/*
 geckodriver.log
 .idea
 __pycache__
+*__pycache__
 .secrets
 *.log
 output/*
