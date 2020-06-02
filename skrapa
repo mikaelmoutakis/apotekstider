@@ -251,7 +251,7 @@ class MySpider(object):
             return True, BeautifulSoup(page_source, parser)
 
     def export_cache(self, export_cache_directory):
-        subdirectory = Path(datetime.now().strftime("%Y-W%V"))
+        subdirectory = Path(datetime.now().strftime('%G-%m-%d'))
         output = Path.joinpath(Path(export_cache_directory), subdirectory)
         if not output.is_dir():
             output.mkdir(parents=True)
