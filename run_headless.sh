@@ -9,4 +9,4 @@ cd ~/apotekstider
 --suppress-errors \
 --exec='./misc/send_output_files_with_email.py --export-cache={} {}' \
 ALLA
-
+killall firefox
