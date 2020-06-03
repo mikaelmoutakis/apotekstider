@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 cd ~/apotekstider
 ./skrapa \
+--save-sitemap \
 --profile='../firefox-profile' \
 --output='../output' \
 --cache='../cache' \
