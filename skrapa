@@ -112,6 +112,38 @@ def test_weekday_text_to_int():
     assert output3 == WEEKDAYS
 
 
+ZIPCODE = re.compile(r"([0-9]{3}\s{0,1}[0-9]{2}\s{0,1})")
+
+
+def separate_zip_from_city(txt):
+    """Separates postal code from city"""
+    zip_code = ZIPCODE.findall(txt)
+    if zip_code:
+        zip_code = zip_code[0].replace(" ", "").strip()
+    else:
+        zip_code = None
+    city = ZIPCODE.sub("", txt).strip()
+    return zip_code, city
+
+
+def test_separate_zip_from_city():
+    examples = (
+        ("19272 Sollentuna", "19272", "Sollentuna"),
+        ("192 72 Sollentuna", "19272", "Sollentuna"),
+        ("192 72 Sollentuna Kommun", "19272", "Sollentuna Kommun"),
+        ("19272 Sollentuna Kommun", "19272", "Sollentuna Kommun"),
+        ("46330 Lilla Edet", "46330", "Lilla Edet"),
+        ("Lilla edet", None, "Lilla edet"),
+        ("46330 Lilla Edet 433d", "46330", "Lilla Edet 433d"),
+    )
+
+    for org, zip_code, city in examples:
+        z, c = separate_zip_from_city(org)
+        # print(org,x)
+        assert z == zip_code
+        assert c == city
+
+
 def get_firefox_profile_path(my_firefox_profile=None):
     if not my_firefox_profile:
         system = platform.system()
@@ -439,7 +471,8 @@ class ApoteketSpider(MySpider):
             location_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
             store_location = soup.select(location_selector)[0].string.strip()
             *street_address, zip_city = store_location.split(",")
-            *zip_code, city = zip_city.split()
+            #*zip_code, city = zip_city.split()
+            zip_code, city = separate_zip_from_city(zip_city)
 
             # geo-coordinates
             mapimage = soup.select_one("#pharmaciesmap-root img")
@@ -455,7 +488,7 @@ class ApoteketSpider(MySpider):
                 lat, long = "", ""
 
             # from mapquest
-            zip_code = "".join(zip_code)
+            #zip_code = "".join(zip_code)
             street_address = ", ".join(street_address)
             address_string = f"{store_name}, {street_address},{zip_code} {city}, Sweden"
             mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(address_string)
@@ -932,11 +965,11 @@ if __name__ == "__main__":
             )
         )
         if arguments["--save-sitemap"]:
-            #save only the sitemap to the pickle files
-            #don't scrape the opening hours
+            # save only the sitemap to the pickle files
+            # don't scrape the opening hours
             curr_module.save_urls_to_cache()
         else:
-            #scrape the opening hours
+            # scrape the opening hours
             curr_module.write_xlsx(path_to_xlsx_file)
     logger.info(f"Finished scraping: {', '.join(pharmacies)}")
     if arguments["--exec"]:
