@@ -988,3 +988,4 @@ if __name__ == "__main__":
         if end_task.returncode > 0:
             subprocess_errors = end_task.stderr.decode("utf-8").strip()
             logger.error(f"{cmd} exited with non-zero status. {subprocess_errors}")
+            sys.exit(end_task.returncode)
