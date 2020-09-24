@@ -89,7 +89,7 @@ You  can also use scraper library to test Selenium and BeautifulSoup.
 
 
 ## Todo:
-* Add command for extracting html pages from cache
-* Update HjartatSpider so it does not rely on their sitemap
 * Add timestamp to each cache entry
+* Add CLI argument for location of secrets file
+* Add CLI argument for location of log files
 
