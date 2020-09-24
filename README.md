@@ -92,4 +92,5 @@ You  can also use scraper library to test Selenium and BeautifulSoup.
 * Add timestamp to each cache entry
 * Add CLI argument for location of secrets file
 * Add CLI argument for location of log files
+* Add code for automatic conversion of opening hours (str) to minutes (int)
 
