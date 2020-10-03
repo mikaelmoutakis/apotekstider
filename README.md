@@ -3,26 +3,28 @@ A set of python scripts for scraping the opening hours off the Swedish pharmacy 
 
 ## Usage
 
-	Usage:
-	    skrapa [options] APOTEK
-	    skrapa (-h | --help)
-
-	Options:
-	    -h,--help                             Show this screen.
-	    --profile=<profile>                   Path to Firefox profile
-	    --output=<dir>                        Output directory [default: output]
-	    --cache=<dir>                         Cache directory [default: cache]
-	    --headless                            Run Firefox headless
-	    -s,--suppress-errors                  Suppresses parsing errors
-	    --exec=<cmd>                          Executes <cmd>+output_directory, e.g. 'foo {}', after finishing scraping.
-	    --keep-open                           Keeps FireFox open after scraping
-
+    Usage:
+        skrapa [options] APOTEK
+        skrapa (-h | --help)
+    
+    Options:
+        -h,--help                             Show this screen.
+        --config=<config>                     Path to config file [default: .secrets]
+        --profile=<profile>                   Path to Firefox profile
+        --output=<dir>                        Output directory [default: output]
+        --cache=<dir>                         Cache directory [default: cache]
+        --headless                            Run Firefox headless
+        -s,--suppress-errors                  Suppresses parsing errors
+        --exec=<cmd>                          Executes <cmd>+cache+output, e.g. 'foo {} {}', afterwards.
+        --keep-open                           Keeps FireFox open after scraping
+        --export-cache=<dir>                  Exports the cache to separate text files in <dir>
+        --save-sitemap                        Saves the store URLs to the cache.
 
 ## Requirements
 
 * Linux or FreeBSD
 * Firefox with the geckoengine selenium driver
-* Python 3.5
+* Python 3.7 or later
 * A key for MapQuests API
 
 ## Installation
@@ -39,13 +41,13 @@ For FreeBSD 11.3 or later you run (replace "py37" with a later python version):
 
     pkg install -y git python37 py37-pip firefox geckodriver py37-selenium py37-lxml
     ln /usr/local/bin/python3.7 /usr/local/bin/python3
-    adduser #add a non-privileged user to run the script
+    echo 'selenium:::::::::password' | adduser -f - #add a non-privileged user to run the script
+    git clone https://github.com/mikaelmoutakis/apotekstider /usr/local/apotekstider
+
 
 As the non-privileged user run
 
-    cd
-    git clone https://github.com/mikaelmoutakis/apotekstider
-    cd apotekstider
+    cd /usr/local/apotekstider
     pip3 install --user -r requirements.freebsd.txt
 
 
@@ -90,7 +92,5 @@ You  can also use scraper library to test Selenium and BeautifulSoup.
 
 ## Todo:
 * Add timestamp to each cache entry
-* Add CLI argument for location of secrets file
-* Add CLI argument for location of log files
 * Add code for automatic conversion of opening hours (str) to minutes (int)
 

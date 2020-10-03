@@ -9,6 +9,7 @@ Usage:
 
 Options:
     -h,--help                             Show this screen.
+    --config=<config>                     Path to config file [default: .secrets]
     --profile=<profile>                   Path to Firefox profile
     --output=<dir>                        Output directory [default: output]
     --cache=<dir>                         Cache directory [default: cache]
@@ -177,6 +178,8 @@ class MySpider(object):
     def __init__(
         self,
         cache_parent_directory,
+        config_path, #tidigare .secrets
+        geckodriver_log_directory,
         my_firefox_profile=None,
         quit_when_finished=True,
         headless=False,
@@ -191,7 +194,15 @@ class MySpider(object):
         options = Options()
         options.headless = headless
         self.profile = webdriver.FirefoxProfile(my_firefox_profile)
-        self.driver = webdriver.Firefox(self.profile, options=options)
+        #directory for the geckodriver log
+        geckodriver_log_directory = Path(geckodriver_log_directory)
+        if not geckodriver_log_directory.exists():
+            logger.critical(f"Could not find logging directory '{config_path}'. Quitting.")
+            sys.exit(1)
+        slp = Path.joinpath(geckodriver_log_directory,"geckodriver.log")
+        self.driver = webdriver.Firefox(self.profile,
+                                        options=options,
+                                        service_log_path=slp)
         # caching
         self.cache_parent_directory = Path(cache_parent_directory)
         cache_dir = Path.joinpath(
@@ -205,8 +216,12 @@ class MySpider(object):
         self.geo_cache = shelve.open(
             str(Path.joinpath(self.cache_parent_directory, "geocache.pickle"))
         )
-        self.secrets = configparser.ConfigParser()
-        self.secrets.read(".secrets")
+        if not Path(config_path).exists():
+            logger.critical(f"Could not find config file '{config_path}'. Quitting.")
+            sys.exit(1)
+        else:
+            self.secrets = configparser.ConfigParser()
+            self.secrets.read(config_path)
         logger.info(f"Running {self.__class__.__name__}")
         self.export_cache_directory = export_cache_to_directory
 
@@ -911,23 +926,25 @@ if __name__ == "__main__":
     # options: firefox profile, output directory, headless,
     # arguments: pharmacy
     arguments = docopt(__doc__, version="skrapa 0.2")
-
     # create output directory if needed
     if not arguments["--output"]:
+        output_parent_directory = Path("output")
         output_directory = Path.joinpath(
-            Path("output"), Path(f"{datetime.now().strftime('%G-%m-%d')}")
+            output_parent_directory, Path(f"{datetime.now().strftime('%G-%m-%d')}")
         )
     else:
+        output_parent_directory = Path(arguments["--output"])
         output_directory = Path.joinpath(
-            Path(arguments["--output"]), Path(f"{datetime.now().strftime('%G-%m-%d')}")
+            output_parent_directory, Path(f"{datetime.now().strftime('%G-%m-%d')}")
         )
     if not output_directory.is_dir():
         output_directory.mkdir(parents=True)
 
     # logging
-    logger.add("skrapa.error.log", rotation="1 week", retention="6 week", level="ERROR")
+
+    logger.add(Path.joinpath(output_parent_directory,"skrapa.error.log"), rotation="1 week", retention="6 week", level="ERROR")
     logger.add(Path.joinpath(output_directory, Path("error.log")), level="WARNING")
-    logger.add("skrapa.info.log", rotation="1 week", retention="6 week", level="INFO")
+    logger.add(Path.joinpath(output_parent_directory,"skrapa.info.log"), rotation="1 week", retention="6 week", level="INFO")
     # logger.debug(arguments)
 
     # case-then-switch for which module to run
@@ -952,6 +969,8 @@ if __name__ == "__main__":
     for current_pharmacy in pharmacies:
         curr_module = all_modules[current_pharmacy](
             cache_parent_directory=arguments["--cache"],
+            config_path=arguments["--config"],
+            geckodriver_log_directory=output_parent_directory,
             my_firefox_profile=arguments["--profile"],
             headless=arguments["--headless"],
             quit_when_finished=not arguments["--keep-open"],  # False -> True
