@@ -93,4 +93,5 @@ You  can also use scraper library to test Selenium and BeautifulSoup.
 ## Todo:
 * Add timestamp to each cache entry
 * Add code for automatic conversion of opening hours (str) to minutes (int)
-
+* test-flag (scrapes a limited no of stores)
+* add scraping statistics to end of log
