@@ -41,6 +41,9 @@ from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.firefox.options import Options
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+import urllib.parse as p
 from bs4 import BeautifulSoup
 import time
 from datetime import datetime
@@ -252,6 +255,28 @@ class MySpider(object):
             else:
                 return None
 
+    def get_url(self,url,wait_condition=False):
+        """Overwritten when we need a specific algorithm for
+        retrieving the page"""
+        self.driver.get(url)  # wait condition efter get?
+        # waiting for a particular element of the page to load
+        # before returning the whole page
+        if wait_condition:
+            try:
+                WebDriverWait(self.driver, timeout=15).until(wait_condition)
+            except TimeoutException:
+                # Waited for an element that never showed up
+                logger.error(
+                    f"TimeoutException: The html part we waited for never showed up in {url}"
+                )
+                logger.error(f"Could not retrieve {url}")
+                return False, None
+        page_source = self.driver.page_source
+        return True, page_source
+
+
+
+
     def make_soup(self, url, parser="lxml", wait_condition=False, soup_cache=None):
         # soup_cache != None when Hjärtat's sitemap is unavaiable
         # and we need to read from a previous sitemap
@@ -274,28 +299,21 @@ class MySpider(object):
                 logger.info(f"Web page from cache: {url}")
             except KeyError:
                 # url not in cache
-                self.driver.get(url)  # wait condition efter get?
-                # waiting for a particular element of the page to load
-                # before returning the whole page
-                if wait_condition:
-                    try:
-                        WebDriverWait(self.driver, timeout=15).until(wait_condition)
-                    except TimeoutException:
-                        # Waited for an element that never showed up
-                        logger.error(
-                            f"TimeoutException: The html part we waited for never showed up in {url}"
-                        )
-                        logger.error(f"Could not retrieve {url}")
-                        return False, None
-                logger.info(f"Web page from net: {url}")
-                page_source = self.driver.page_source
+                got_source,page_source = self.get_url(url,wait_condition)
                 # add page source to cache
-                soup_cache[url] = page_source
-                soup_cache.sync()  # saves cache
-                # cache is also saved when scraping
-                # is finished with write_xlsx
-                # avoid hammering the server
-                time.sleep(self.WAIT_TIME)
+                if got_source:
+                    logger.info(f"Web page from net: {url}")
+                    soup_cache[url] = page_source
+                    soup_cache.sync()  # saves cache
+                    # cache is also saved when scraping
+                    # is finished with write_xlsx
+                    # avoid hammering the server
+                    time.sleep(self.WAIT_TIME)
+                else:
+                    #timeout error or such prevented
+                    #us from retrieving the source code
+                    #for the page
+                    return False, None
             return True, BeautifulSoup(page_source, parser)
 
     def export_cache(self, export_cache_directory):
@@ -616,6 +634,57 @@ class KronansApotekSpider(MySpider):
 
     START_URLS = ["https://www.kronansapotek.se/sitemap.xml"]
 
+    def get_url(self,url,wait_condition=False):
+        """
+        This function overwrites a function in the parent
+        class that is called by the make_soup(url) function.
+        The links from Kronan's sitemap no longer leads to
+        valid store pages. Therefore we have to extract the
+        name of the store from the url from the sitemap,
+        and then search for the store using their search
+        engine."""
+        unquoted_url = p.unquote(url)
+        store_name = unquoted_url.split("/")[-1].split("?")[0]
+        search_field_locator = "gps-search"
+        search_page_url = "https://www.kronansapotek.se/store-finder/"
+        self.driver.get(search_page_url)
+        try:
+            #We wait for the search field to show up
+            element = WebDriverWait(self.driver, 60).until(
+                EC.presence_of_element_located((By.ID, search_field_locator))
+            )
+        except TimeoutException:
+            # Waited for an element that never showed up
+            logger.error(
+                f"TimeoutException: The html part we waited for never showed up in {url}"
+            )
+            logger.error(f"Could not retrieve {search_page_url}")
+            return False, None
+        #We enter the name of the store in the search field
+        self.driver.find_element(By.ID, search_field_locator).send_keys(store_name)
+        #We click the search button
+        self.driver.find_element(By.CSS_SELECTOR, ".button").click()
+        time.sleep(1)
+        #We now get a page with search results
+        #We click on the list "LISTA" tab
+        self.driver.find_element(By.CSS_SELECTOR, "li:nth-child(2) > label").click()
+        time.sleep(1)
+        #We click on the link for the first search result
+        self.driver.find_element(By.CSS_SELECTOR, "li:nth-child(1) .link:nth-child(2)").click()
+        time.sleep(2)
+        #We not test that the found page actually contains
+        #opening hours
+        required_header_selector = "h3.typography-subtitle"
+        testheader = self.driver.find_element(By.CSS_SELECTOR, required_header_selector).text
+        if testheader == "Öppettider":
+            #We retrieve the page source for the store page
+            page_source = self.driver.page_source
+            return True, page_source
+        else:
+            #Nope, this is not a page with opening hours
+            logger.error(f"Could not find any opening hours for {store_name}")
+            return False, None
+
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
         logger.debug("Kronans Apotek: Hämtar sitemap")
@@ -647,13 +716,17 @@ class KronansApotekSpider(MySpider):
         new_page, soup = self.make_soup(url)
         if new_page:
             # Store name and address
-            store_name, *_ = soup.title.string.strip().split(" | ")
-            street_address = soup.find(itemprop="streetAddress")
+            store_name, *_ = soup.title.string.strip().split(" | ") #todo: ändra så att den hämtas från texten
+            street_address_selektor = "address.typography-subtitle > p:nth-child(1)"
+            street_address = soup.select_one(street_address_selektor)
             if street_address:
                 # url is a valid store page
                 street_address = street_address.string
-                zip_code = soup.find(itemprop="postalCode").string
-                city = soup.find(itemprop="addressLocality").string
+                zip_city_selector = "address.typography-subtitle > span:nth-child(2)"
+                zip_code, *city = soup.select_one(zip_city_selector).string.split()
+                city = " ".join(city)
+                #todo: kod som kollar att jag fått rätt element
+
 
                 # geo-coordinates
                 # long and lat are in the url
@@ -669,11 +742,10 @@ class KronansApotekSpider(MySpider):
                 )
 
                 # opening hours
-                opening_hours = soup.select_one(".store-openings")
-                # logger.debug(opening_hours)
-                days = opening_hours.find_all("dt")
-                opening_hours = opening_hours.find_all("dd")
-                for weekday, hours in zip(days, opening_hours):
+                opening_hours_selector = "div.container:nth-child(3) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > section:nth-child(2) > ul:nth-child(2)"
+                opening_hours = soup.select_one(opening_hours_selector).find_all("li")
+                for row in opening_hours:
+                    weekday, hours = row.find_all("span")
                     weekday_no = weekday_text_to_int(weekday.text)
                     yield {
                         "chain": self.__class__.__name__,
@@ -693,6 +765,10 @@ class KronansApotekSpider(MySpider):
                         "mq_lat": mq_latLng["lat"],
                         "mq_long": mq_latLng["lng"],
                     }
+        else:
+            #no new page
+            #todo: what to do?
+            pass
 
 
 class HjartatSpider(MySpider):
