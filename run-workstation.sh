@@ -3,6 +3,6 @@
 --config='.secrets' \
 --output='../output' \
 --cache='../cache' \
---suppress-errors \
+--profile='../firefox-profile' \
 kronans
 

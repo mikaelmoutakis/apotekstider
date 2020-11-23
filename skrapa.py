@@ -212,6 +212,9 @@ class MySpider(object):
         self.driver = webdriver.Firefox(
             self.profile, options=options, service_log_path=slp
         )
+        #set large window size
+        self.driver.set_window_position(0, 0)
+        self.driver.set_window_size(1920, 1080)
         # caching
         self.cache_parent_directory = Path(cache_parent_directory)
         cache_dir = Path.joinpath(
