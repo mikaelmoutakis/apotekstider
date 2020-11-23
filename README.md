@@ -31,7 +31,7 @@ A set of python scripts for scraping the opening hours off the Swedish pharmacy 
 Install the required modules and applications. Please see the documentation for how to install each of them on your
 operating system. For Ubuntu 20.04 or later you run:
 
-    sudo apt install python3-pip firefox-geckoengine git
+    sudo apt install python3-pip firefox-geckodriver git
     cd 
     git clone https://github.com/mikaelmoutakis/apotekstider
     cd apotekstider
