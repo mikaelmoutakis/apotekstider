@@ -326,15 +326,19 @@ class MySpider(object):
         if not output.is_dir():
             output.mkdir(parents=True)
         for key in self.cache:
-            try:
-                soup = BeautifulSoup(self.cache[key])
-                file_name = soup.title.text + ".txt"
-                path = Path.joinpath(output, file_name)
-                with open(path, "w") as page:
-                    logger.info(f"Exporting to {file_name}")
-                    page.write(soup.body.text)
-            except AttributeError:
-                logger.warning(f"Could not export {key}, has no title")
+            if ".xml" in key:
+                #The cached page is a sitemap. Do not export
+                pass
+            else:
+                try:
+                    soup = BeautifulSoup(self.cache[key])
+                    file_name = soup.title.text + ".txt"
+                    path = Path.joinpath(output, file_name)
+                    with open(path, "w") as page:
+                        logger.info(f"Exporting to {file_name}")
+                        page.write(soup.body.text)
+                except AttributeError:
+                    logger.warning(f"Could not export {key}, has no title")
 
     def write_cache(self):
         if self.export_cache_directory:
