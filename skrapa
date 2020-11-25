@@ -40,7 +40,7 @@ import sys
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.firefox.options import Options
-from selenium.common.exceptions import TimeoutException,NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -212,7 +212,7 @@ class MySpider(object):
         self.driver = webdriver.Firefox(
             self.profile, options=options, service_log_path=slp
         )
-        #set large window size
+        # set large window size
         self.driver.set_window_position(0, 0)
         self.driver.set_window_size(1920, 1080)
         # caching
@@ -320,7 +320,7 @@ class MySpider(object):
                     # timeout error or such prevented
                     # us from retrieving the source code
                     # for the page
-                    return False, None
+                    raise ScrapeFailure(f"Could not retrieve source for {url}")
             return True, BeautifulSoup(page_source, parser)
 
     def export_cache(self, export_cache_directory):
@@ -330,7 +330,7 @@ class MySpider(object):
             output.mkdir(parents=True)
         for key in self.cache:
             if ".xml" in key:
-                #The cached page is a sitemap. Do not export
+                # The cached page is a sitemap. Do not export
                 pass
             else:
                 try:
@@ -411,7 +411,9 @@ class MySpider(object):
                     self.NO_OK_PAGES += 1
         # end of scraping
         page_stats = self.NO_OK_PAGES / self.NO_VISITED_PAGES
-        logger.info(f"{self.NO_VISITED_PAGES-self.NO_OK_PAGES} out of {self.NO_VISITED_PAGES} failed {page_stats*100} %.")
+        logger.info(
+            f"{self.NO_VISITED_PAGES-self.NO_OK_PAGES} out of {self.NO_VISITED_PAGES} failed ({(1-page_stats)*100:.1f} %)."
+        )
         if page_stats < self.LIMIT_SCRAPING_FAILURE:
             logger.error(
                 f"More than {round(self.LIMIT_SCRAPING_FAILURE*100,0)} of the pages failed"
@@ -452,6 +454,8 @@ class ApoteksgruppenSpider(MySpider):
         """Retrieves the store's opening hours and street address"""
         new_page, soup = self.make_soup(url)
         if new_page:
+            # we found a new page to retrieve
+            # new_page == False means that we have retrieved this page before
             street_address = soup.find(itemprop="streetAddress").string
             city = soup.find(itemprop="addressLocality").string
             opening_hours = soup.select("section.pharmacy-opening-hours li")
@@ -484,9 +488,12 @@ class ApoteksgruppenSpider(MySpider):
                     "mq_lat": mq_latLng["lat"],
                     "mq_long": mq_latLng["lng"],
                 }
+            if not opening_hours:
+                raise ScrapeFailure(f"{store_name} had no opening hours. {url}")
+            # else:
+            #     logger.info(f"{store_name}, {weekday}: {hours}")
 
 
-# todo: uppdatera alla sidor med new_page
 class ApoteketSpider(MySpider):
 
     START_URLS = ["https://www.apoteket.se/sitemap.xml"]
@@ -522,55 +529,70 @@ class ApoteketSpider(MySpider):
             # soup = self.make_soup(url)
             # Store name and address
             store_name, *_ = soup.title.string.strip().split(" - ")
-            location_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
-            store_location = soup.select(location_selector)[0].string.strip()
-            *street_address, zip_city = store_location.split(",")
-            # *zip_code, city = zip_city.split()
-            zip_code, city = separate_zip_from_city(zip_city)
+            if "Hemofili" not in store_name:
+                # Hemofili - annan aktör, Pajala is an hidden, fake store that still is in the sitemap.
+                location_selector = "#main > div:nth-child(1) > div > p:nth-child(1)"
+                store_location = soup.select(location_selector)[0].string.strip()
+                *street_address, zip_city = store_location.split(",")
+                # *zip_code, city = zip_city.split()
+                zip_code, city = separate_zip_from_city(zip_city)
 
-            # geo-coordinates
-            mapimage = soup.select_one("#pharmaciesmap-root img")
-            # logger.debug(mapimage)
+                # geo-coordinates
+                mapimage = soup.select_one("#pharmaciesmap-root img")
+                # logger.debug(mapimage)
 
-            if mapimage:
-                src = mapimage["src"]
-                lat, long, *_ = re.findall(
-                    "([0-9]{2}\.[0-9]{1,13})", src
-                )  # eller är det long, lat?
-            else:
-                logger.warning(f"No geo-info: {url}")
-                lat, long = "", ""
+                if mapimage:
+                    src = mapimage["src"]
+                    lat, long, *_ = re.findall(
+                        "([0-9]{2}\.[0-9]{1,13})", src
+                    )  # eller är det long, lat?
+                else:
+                    logger.warning(f"No geo-info: {url}")
+                    lat, long = "", ""
 
-            # from mapquest
-            # zip_code = "".join(zip_code)
-            street_address = ", ".join(street_address)
-            address_string = f"{store_name}, {street_address},{zip_code} {city}, Sweden"
-            mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(address_string)
+                # from mapquest
+                # zip_code = "".join(zip_code)
+                street_address = ", ".join(street_address)
+                address_string = (
+                    f"{store_name}, {street_address},{zip_code} {city}, Sweden"
+                )
+                mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(
+                    address_string
+                )
 
-            # opening hours
-            opening_hours = soup.select("ul.underlined-list li")
-            for day in opening_hours:
-                weekday = day.select("span.date")[0].string.strip()
-                hours = day.select("span.time")[0].string.strip()
-                weekday_no = weekday_text_to_int(weekday)
-                yield {
-                    "chain": self.__class__.__name__,
-                    "url": url,
-                    "store_name": store_name,
-                    "long": long,
-                    "lat": lat,
-                    "address": street_address,
-                    "zip_code": zip_code,
-                    "city": city,
-                    "datetime": datetime.now().isoformat(),
-                    "weekday": weekday,
-                    "weekday_no": weekday_no,
-                    "hours": hours,
-                    "mq_street": mq_street,
-                    "mq_zip_code": mq_zip_code,
-                    "mq_lat": mq_latLng["lat"],
-                    "mq_long": mq_latLng["lng"],
-                }
+                # opening hours
+                opening_hours = soup.select("ul.underlined-list li")
+                for day in opening_hours:
+                    try:
+                        weekday = day.select("span.date")[0].string.strip()
+                        hours = day.select("span.time")[0].string.strip()
+                        weekday_no = weekday_text_to_int(weekday)
+                    except IndexError:
+                        raise ScrapeFailure(f"{store_name} had no opening hours. {url}")
+                    yield {
+                        "chain": self.__class__.__name__,
+                        "url": url,
+                        "store_name": store_name,
+                        "long": long,
+                        "lat": lat,
+                        "address": street_address,
+                        "zip_code": zip_code,
+                        "city": city,
+                        "datetime": datetime.now().isoformat(),
+                        "weekday": weekday,
+                        "weekday_no": weekday_no,
+                        "hours": hours,
+                        "mq_street": mq_street,
+                        "mq_zip_code": mq_zip_code,
+                        "mq_lat": mq_latLng["lat"],
+                        "mq_long": mq_latLng["lng"],
+                    }
+                if not opening_hours:
+                    if "ICA NÄRA" in store_name:
+                        # We cannot expect opening hours here.
+                        pass
+                    else:
+                        raise ScrapeFailure(f"{store_name} had no opening hours. {url}")
 
 
 class LloydsSpider(MySpider):
@@ -597,6 +619,12 @@ class LloydsSpider(MySpider):
             # Store name and address
             # todo: fix this
             store_name, *_ = soup.title.string.strip().split(" | ")
+        if store_name not in [
+            "Parallellexport lager",
+            "Lloydsapotek Handen Handenterminalen",
+            "LloydsApotek Uppsala Samariten2",
+            "LloydsApotek Lund Västra Mårtensgatan2",
+        ]:
             location_selector = ".hidden-xs"
             store_location = soup.select_one(location_selector)
             street_address, zip_code, city = store_location.get_text().split("\xa0")
@@ -649,6 +677,10 @@ class LloydsSpider(MySpider):
                     "mq_lat": mq_latLng["lat"],
                     "mq_long": mq_latLng["lng"],
                 }
+            if not rows:
+                raise ScrapeFailure(
+                    f"Could not extract opening hours from '{store_name}'"
+                )
 
 
 class KronansApotekSpider(MySpider):
@@ -665,18 +697,18 @@ class KronansApotekSpider(MySpider):
         and then search for the store using their search
         engine."""
         if ".xml" in url:
-            #The url is a sitemap
-            #We just downloading it using the standard function
-            return super().get_url(url,wait_condition)
+            # The url is a sitemap
+            # We just downloading it using the standard function
+            return super().get_url(url, wait_condition)
         else:
-            #Url is not a sitemap
-            #We find the store page by searching for it
-            #with the "hitta butik" search function
+            # Url is not a sitemap
+            # We find the store page by searching for it
+            # with the "hitta butik" search function
 
-            #We extract the store name from the url's GET command
+            # We extract the store name from the url's GET command
             unquoted_url = p.unquote(url)
             store_name = unquoted_url.split("/")[-1].split("?")[0]
-            #the CSS locator for the search field
+            # the CSS locator for the search field
             search_field_locator = "gps-search"
             search_page_url = "https://www.kronansapotek.se/store-finder/"
             self.driver.get(search_page_url)
@@ -696,13 +728,17 @@ class KronansApotekSpider(MySpider):
                 # We try to find all the elements for Selenium to click on
                 # We start by searching for a store
                 # We enter the name of the store in the search field
-                self.driver.find_element(By.ID, search_field_locator).send_keys(store_name)
+                self.driver.find_element(By.ID, search_field_locator).send_keys(
+                    store_name
+                )
                 # We click the search button
                 self.driver.find_element(By.CSS_SELECTOR, ".button").click()
                 time.sleep(1)
                 # We now get a page with search results
                 # We click on the list "LISTA" tab
-                self.driver.find_element(By.CSS_SELECTOR, "li:nth-child(2) > label").click()
+                self.driver.find_element(
+                    By.CSS_SELECTOR, "li:nth-child(2) > label"
+                ).click()
                 time.sleep(1)
                 # We click on the link for the first search result
                 self.driver.find_element(
@@ -724,7 +760,7 @@ class KronansApotekSpider(MySpider):
                     logger.error(f"Could not find any opening hours for {store_name}")
                     return False, None
             except NoSuchElementException:
-                #We failed our search-and-click dance
+                # We failed our search-and-click dance
                 logger.error(f"Could not find any opening hours for {store_name}")
                 return False, None
 
@@ -762,12 +798,12 @@ class KronansApotekSpider(MySpider):
                 # url is a valid store page
                 street_address = street_address.string
                 zip_city_selector = "address.typography-subtitle > span:nth-child(2)"
-                #The first word is the zip code
-                #The rest is assumed to be the name
-                #of the city
+                # The first word is the zip code
+                # The rest is assumed to be the name
+                # of the city
                 zip_code, *city = soup.select_one(zip_city_selector).string.split()
-                #We join the name of the city together
-                #eg. ["Västra","Frölunda"] becomes "Västra Frölunda"
+                # We join the name of the city together
+                # eg. ["Västra","Frölunda"] becomes "Västra Frölunda"
                 city = " ".join(city)
 
                 # geo-coordinates
@@ -788,7 +824,9 @@ class KronansApotekSpider(MySpider):
                 opening_hours_selector = "div.container:nth-child(3) > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > section:nth-child(2) > ul:nth-child(2)"
                 opening_hours = soup.select_one(opening_hours_selector).find_all("li")
                 if not opening_hours:
-                    raise ScrapeFailure(f"Could not extract opening hours from {store_name}")
+                    raise ScrapeFailure(
+                        f"Could not extract opening hours from {store_name}"
+                    )
                 for row in opening_hours:
                     weekday, hours = row.find_all("span")
                     weekday_no = weekday_text_to_int(weekday.text)
@@ -810,9 +848,6 @@ class KronansApotekSpider(MySpider):
                         "mq_lat": mq_latLng["lat"],
                         "mq_long": mq_latLng["lng"],
                     }
-        else:
-            # no new page
-            raise ScrapeFailure(f"Could not scrape info from {url}")
 
 
 class HjartatSpider(MySpider):
@@ -1092,7 +1127,10 @@ if __name__ == "__main__":
     elif arguments["APOTEK"] in all_modules:
         pharmacies = [arguments["APOTEK"]]
     else:
-        logger.critical(f'{arguments["APOTEK"]} is not a valid Pharmacy Chain')
+        valid_chains = ", ".join(list(all_modules.keys()))
+        logger.critical(
+            f'"{arguments["APOTEK"]}" is not a valid Pharmacy Chain. Choose "{valid_chains}" or "ALLA"'
+        )
         sys.exit(1)
 
     # scrape one or all chains

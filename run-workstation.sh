@@ -4,5 +4,6 @@
 --output='../output' \
 --cache='../cache' \
 --profile='../firefox-profile' \
-kronans
+--headless \
+$1
 
