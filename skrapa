@@ -323,6 +323,9 @@ class MySpider(object):
                     raise ScrapeFailure(f"Could not retrieve source for {url}")
             return True, BeautifulSoup(page_source, parser)
 
+    def get_current_store_name(self, soup):
+        return soup.title.text
+
     def export_cache(self, export_cache_directory):
         subdirectory = Path(datetime.now().strftime("%G-%m-%d"))
         output = Path.joinpath(Path(export_cache_directory), subdirectory)
@@ -335,7 +338,7 @@ class MySpider(object):
             else:
                 try:
                     soup = BeautifulSoup(self.cache[key])
-                    file_name = soup.title.text + ".txt"
+                    file_name = self.get_current_store_name(soup) + ".txt"
                     path = Path.joinpath(output, file_name)
                     with open(path, "w") as page:
                         logger.info(f"Exporting to {file_name}")
@@ -687,6 +690,11 @@ class KronansApotekSpider(MySpider):
 
     START_URLS = ["https://www.kronansapotek.se/sitemap.xml"]
 
+    def get_current_store_name(self, soup):
+        store_name_selector = "h2.typography-title"
+        store_name = soup.select_one(store_name_selector).string
+        return store_name
+
     def get_url(self, url, wait_condition=False):
         """
         This function overwrites a function in the parent
@@ -788,8 +796,7 @@ class KronansApotekSpider(MySpider):
         new_page, soup = self.make_soup(url)
         if new_page:
             # Store name and address
-            store_name_selector = "h2.typography-title"
-            store_name = soup.select_one(store_name_selector).string
+            store_name = self.get_current_store_name(soup)
             if not (store_name and "Kronans Apotek" in store_name):
                 raise ScrapeFailure(f"{url} did not have a valid store name")
             street_address_selector = "address.typography-subtitle > p:nth-child(1)"
@@ -948,8 +955,9 @@ class HjartatSpider(MySpider):
         )
         if new_page:
             info_box = soup.find(id="findPharmacyContentHolder2")
-            if info_box:
-
+            if not info_box:
+                raise ScrapeFailure(f"Could not find the element containing opening hours in {url}")
+            else:
                 # Store name and address
                 *_, store_name = soup.title.string.strip().split(" vid ")
 
@@ -1008,67 +1016,83 @@ class SOAFSpider(MySpider):
 
     def get_members_page(self, start_url):
         new_page, soup = self.make_soup(start_url)
-        for nr in range(1000):
+        nr = 1
+        while True:
             collection = soup.find(id=f"collection{nr}")
-            if collection and "E-post" in collection.text:
-                rows = [
-                    m.strip() for m in collection.get_text(";").split(";") if len(m) > 2
-                ]
-                (
-                    store_name,
-                    _,
-                    telephone,
-                    _,
-                    email,
-                    _,
-                    street_address,
-                    *zip_city_region,
-                ) = rows
-                if "@" in email:
-                    name, domain = email.split("@")
-                    url = f"https://www.{domain}/"
-                else:
-                    url = ""
-                weekdays = [
-                    "måndag",
-                    "tisdag",
-                    "onsdag",
-                    "torsdag",
-                    "fredag",
-                    "lördag",
-                    "söndag",
-                ]
-                if "Kontakt:" not in store_name:
-                    # skips the box with SOAFs contact info
-                    # mapquest
-                    zip_city_region = ",".join(zip_city_region)
-                    address_string = (
-                        f"{store_name}, {street_address},  {zip_city_region}, Sweden"
-                    )
-                    mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(
-                        address_string
-                    )
-                    for weekday in weekdays:
-                        weekday_no = weekday_text_to_int(weekday)
-                        zip_code = " "
-                        yield {
-                            "chain": self.__class__.__name__,
-                            "url": url,
-                            "store_name": store_name,
-                            "long": "",
-                            "lat": "",
-                            "address": street_address,
-                            "zip_code": zip_code,
-                            "city": zip_city_region,
-                            "datetime": datetime.now().isoformat(),
-                            "weekday": weekday,
-                            "weekday_no": weekday_no,
-                            "hours": "",
-                            "mq_street": mq_street,
-                            "mq_zip_code": mq_zip_code,
-                            "mq_lat": mq_latLng["lat"],
-                            "mq_long": mq_latLng["lng"],
-                        }
+            if collection:
+                if "E-post" in collection.text:
+                    rows = [
+                        m.strip() for m in collection.get_text(";").split(";") if len(m) > 2
+                    ]
+                    (
+                        store_name,
+                        _,
+                        telephone,
+                        _,
+                        email,
+                        _,
+                        street_address,
+                        *zip_city_region,
+                    ) = rows
+                    if "@" in email:
+                        name, domain = email.split("@")
+                        if not (domain in ("gmail.com","hotmail.com")):
+                            # todo: lägg till hämtning av förstasidan från varje medlemsföretag
+                            # typ: make soup, then extract it at export cache phase
+                            url = f"https://www.{domain}/"
+                        else:
+                            url = ""
+                    else:
+                        url = ""
+                    weekdays = [
+                        "måndag",
+                        "tisdag",
+                        "onsdag",
+                        "torsdag",
+                        "fredag",
+                        "lördag",
+                        "söndag",
+                    ]
+                    if "Kontakt:" not in store_name:
+                        # skips the box with SOAFs contact info
+                        # mapquest
+                        zip_city_region = ",".join(zip_city_region)
+                        address_string = (
+                            f"{store_name}, {street_address},  {zip_city_region}, Sweden"
+                        )
+                        mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(
+                            address_string
+                        )
+                        for weekday in weekdays:
+                            weekday_no = weekday_text_to_int(weekday)
+                            zip_code = " "
+                            yield {
+                                "chain": self.__class__.__name__,
+                                "url": url,
+                                "store_name": store_name,
+                                "long": "",
+                                "lat": "",
+                                "address": street_address,
+                                "zip_code": zip_code,
+                                "city": zip_city_region,
+                                "datetime": datetime.now().isoformat(),
+                                "weekday": weekday,
+                                "weekday_no": weekday_no,
+                                "hours": "",
+                                "mq_street": mq_street,
+                                "mq_zip_code": mq_zip_code,
+                                "mq_lat": mq_latLng["lat"],
+                                "mq_long": mq_latLng["lng"],
+                            }
+                nr += 1
+
+            else:
+                #we found the last Pharmacy in the previous iteration of the loop
+                break
+
+
+
+
 
     def scrape(self):
         for row in self.get_members_page(self.START_URLS):
