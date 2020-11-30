@@ -511,11 +511,13 @@ class ApoteketSpider(MySpider):
         no_search_hits = 0
         for loc in locs:
             store_url = loc.text
-            http, _, domain, subcat, *remainder = store_url.split("/")
-            if subcat == "apotek" and len(remainder) > 1:
-                if "-lan/" not in store_url and "/ombud" not in store_url:
-                    no_search_hits += 1
-                    yield store_url
+            store_url_parts = store_url.split("/")
+            if len(store_url_parts)>=4:
+                http, _, domain, subcat, *remainder = store_url_parts
+                if subcat == "apotek" and len(remainder) > 1:
+                    if "-lan/" not in store_url and "/ombud" not in store_url:
+                        no_search_hits += 1
+                        yield store_url
         if no_search_hits == 0:
             raise ScrapeFailure(f"Could not find any of Apoteket ABs store pages")
         logger.info(f"Apoteket AB: Found {no_search_hits} url candidates")
