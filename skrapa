@@ -205,7 +205,7 @@ class MySpider(object):
         geckodriver_log_directory = Path(geckodriver_log_directory)
         if not geckodriver_log_directory.exists():
             logger.critical(
-                f"Could not find logging directory '{config_path}'. Quitting."
+                f"Could not find geckodriver log directory '{geckodriver_log_directory}'. Quitting."
             )
             sys.exit(1)
         slp = Path.joinpath(geckodriver_log_directory, "geckodriver.log")
@@ -228,7 +228,7 @@ class MySpider(object):
         self.geo_cache = shelve.open(
             str(Path.joinpath(self.cache_parent_directory, "geocache.pickle"))
         )
-        if not Path(config_path).exists():
+        if not (Path(config_path).exists() and Path(config_path).is_file()):
             logger.critical(f"Could not find config file '{config_path}'. Quitting.")
             sys.exit(1)
         else:
@@ -512,7 +512,7 @@ class ApoteketSpider(MySpider):
         for loc in locs:
             store_url = loc.text
             store_url_parts = store_url.split("/")
-            if len(store_url_parts)>=4:
+            if len(store_url_parts) >= 4:
                 http, _, domain, subcat, *remainder = store_url_parts
                 if subcat == "apotek" and len(remainder) > 1:
                     if "-lan/" not in store_url and "/ombud" not in store_url:
@@ -958,7 +958,9 @@ class HjartatSpider(MySpider):
         if new_page:
             info_box = soup.find(id="findPharmacyContentHolder2")
             if not info_box:
-                raise ScrapeFailure(f"Could not find the element containing opening hours in {url}")
+                raise ScrapeFailure(
+                    f"Could not find the element containing opening hours in {url}"
+                )
             else:
                 # Store name and address
                 *_, store_name = soup.title.string.strip().split(" vid ")
@@ -1024,7 +1026,9 @@ class SOAFSpider(MySpider):
             if collection:
                 if "E-post" in collection.text:
                     rows = [
-                        m.strip() for m in collection.get_text(";").split(";") if len(m) > 2
+                        m.strip()
+                        for m in collection.get_text(";").split(";")
+                        if len(m) > 2
                     ]
                     (
                         store_name,
@@ -1038,7 +1042,7 @@ class SOAFSpider(MySpider):
                     ) = rows
                     if "@" in email:
                         name, domain = email.split("@")
-                        if not (domain in ("gmail.com","hotmail.com")):
+                        if not (domain in ("gmail.com", "hotmail.com")):
                             # todo: lägg till hämtning av förstasidan från varje medlemsföretag
                             # typ: make soup, then extract it at export cache phase
                             url = f"https://www.{domain}/"
@@ -1059,9 +1063,7 @@ class SOAFSpider(MySpider):
                         # skips the box with SOAFs contact info
                         # mapquest
                         zip_city_region = ",".join(zip_city_region)
-                        address_string = (
-                            f"{store_name}, {street_address},  {zip_city_region}, Sweden"
-                        )
+                        address_string = f"{store_name}, {street_address},  {zip_city_region}, Sweden"
                         mq_street, mq_zip_code, mq_latLng = self.address_to_long_lat(
                             address_string
                         )
@@ -1089,12 +1091,8 @@ class SOAFSpider(MySpider):
                 nr += 1
 
             else:
-                #we found the last Pharmacy in the previous iteration of the loop
+                # we found the last Pharmacy in the previous iteration of the loop
                 break
-
-
-
-
 
     def scrape(self):
         for row in self.get_members_page(self.START_URLS):
@@ -1125,7 +1123,7 @@ if __name__ == "__main__":
 
     logger.add(
         Path.joinpath(output_parent_directory, "skrapa.error.log"),
-        rotation="1 week",
+        rotation="4h",
         retention="6 week",
         level="ERROR",
     )
