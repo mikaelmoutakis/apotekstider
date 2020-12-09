@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-./skrapa \
+./skrapa.py \
 --config='.secrets' \
 --output='../output' \
 --cache='../cache' \

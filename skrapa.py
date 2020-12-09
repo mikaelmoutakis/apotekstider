@@ -58,6 +58,8 @@ from pathlib import Path
 from loguru import logger
 import subprocess
 
+from jsonshelve import JSONShelve
+
 WEEKDAYS = {
     "måndag": "1",
     "tisdag": "2",
@@ -222,12 +224,18 @@ class MySpider(object):
         )
         if not cache_dir.is_dir():
             cache_dir.mkdir(parents=True)
-        self.cache = shelve.open(
-            str(Path.joinpath(cache_dir, Path(f"{self.__class__.__name__}.pickle")))
+        self.cache = JSONShelve(
+            str(Path.joinpath(cache_dir, Path(f"{self.__class__.__name__}.json")))
         )
-        self.geo_cache = shelve.open(
-            str(Path.joinpath(self.cache_parent_directory, "geocache.pickle"))
+        self.geo_cache = JSONShelve(
+            str(Path.joinpath(self.cache_parent_directory, "geocache.json"))
         )
+        # self.cache = shelve.open(
+        #     str(Path.joinpath(cache_dir, Path(f"{self.__class__.__name__}.pickle")))
+        # )
+        # self.geo_cache = shelve.open(
+        #     str(Path.joinpath(self.cache_parent_directory, "geocache.pickle"))
+        # )
         if not (Path(config_path).exists() and Path(config_path).is_file()):
             logger.critical(f"Could not find config file '{config_path}'. Quitting.")
             sys.exit(1)
@@ -349,8 +357,8 @@ class MySpider(object):
     def write_cache(self):
         if self.export_cache_directory:
             self.export_cache(self.export_cache_directory)
-        self.cache.close()
-        self.geo_cache.close()
+        self.cache.sync()
+        self.geo_cache.sync()
 
     @logger.catch()
     def write_xlsx(self, path):
@@ -943,7 +951,7 @@ class HjartatSpider(MySpider):
                     no_search_hits += 1
         if no_search_hits == 0:
             raise ScrapeFailure(f"Could not find any of Apoteket Hjärtat's stores")
-        prev_sitemap_cache.close()
+        prev_sitemap_cache.sync()
         logger.info(f"Hjärtat: Found {no_search_hits} url candidates")
 
     def get_info_page(self, url):
