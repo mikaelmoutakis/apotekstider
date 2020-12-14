@@ -10,7 +10,6 @@ A set of python scripts for scraping the opening hours off the Swedish pharmacy 
     Options:
         -h,--help                             Show this screen.
         --config=<config>                     Path to config file [default: .secrets]
-        --profile=<profile>                   Path to Firefox profile
         --output=<dir>                        Output directory [default: output]
         --cache=<dir>                         Cache directory [default: cache]
         --headless                            Run Firefox headless
@@ -50,11 +49,6 @@ As the non-privileged user run
     cd /usr/local/apotekstider
     pip3 install --user -r requirements.freebsd.txt
 
-
-###  Set Firefox to block all requests for your location.
-Some of the pharmacy websites will not load unless you explicitly accept or reject requests for location.
-
-Go to preferences and "Privacy & Security". Under the section for "Permissions", press the settings button for "Location". Mark the checkbox for "block new requests asking to access your location".
 
 ## Create a settings file
 Create a text file called ".secrets" in the same folder as this README document.

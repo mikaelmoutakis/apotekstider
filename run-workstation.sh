@@ -1,7 +1,6 @@
 #!/usr/bin/env sh
 ./skrapa.py \
 --config='.secrets' \
---profile='../selenium-profile' \
 --output='../output' \
 --headless \
 --cache='../cache' \

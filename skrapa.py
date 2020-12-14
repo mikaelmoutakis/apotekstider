@@ -150,6 +150,8 @@ def test_separate_zip_from_city():
         assert c == city
 
 
+
+
 class ScrapeFailure(Exception):
     def __init__(self, message):
         super().__init__(message)
@@ -1092,6 +1094,8 @@ class SOAFSpider(MySpider):
 
 
 if __name__ == "__main__":
+    # options: firefox profile, output directory, headless,
+    # arguments: pharmacy
     arguments = docopt(__doc__, version="skrapa 0.2")
     # create output directory if needed
     if not arguments["--output"]:
@@ -1163,7 +1167,7 @@ if __name__ == "__main__":
             )
         )
         if arguments["--save-sitemap"]:
-            # save only the sitemap to the pickle files
+            # save only the list of store urls to the cache file
             # don't scrape the opening hours
             curr_module.save_urls_to_cache()
         else:
