@@ -33,9 +33,8 @@ if __name__ == "__main__":
         geckodriver_log_directory=temp_dir,
         my_firefox_profile=arguments["<firefox_profile_path>"],
         quit_when_finished=True,
-        headless=True
+        headless=True,
     )
     spider.make_soup("https://www.google.com/")
     spider.driver.quit()
     spider.write_cache()
-

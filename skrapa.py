@@ -162,13 +162,13 @@ def get_firefox_profile_path(my_firefox_profile=None):
                 "Your system is not supported. Please see https://tinyurl.com/y4uey2eo"
             )
     profile_home = Path(my_firefox_profile).expanduser()
-    try:
-        profile_path = list(profile_home.glob("*.default*"))[0]
-    except IndexError:
-        raise FileNotFoundError(
-            f"Could not find path to FireFox profile: '{profile_home}'"
-        )
-    return profile_path
+    # try:
+    #     profile_path = list(profile_home.glob("*.default*"))[0]
+    # except IndexError:
+    #     raise FileNotFoundError(
+    #         f"Could not find path to FireFox profile: '{profile_home}'"
+    #     )
+    return profile_home  # profile_path
 
 
 class ScrapeFailure(Exception):
@@ -177,12 +177,12 @@ class ScrapeFailure(Exception):
 
 
 class MySpider(object):
-    WAIT_TIME = 1  # sec paus between each url
+    WAIT_TIME = 1  # sec pause between each url
     START_URLS = []
     VISITED_PAGES = []
     NO_VISITED_PAGES = 0
     NO_OK_PAGES = 0
-    LIMIT_SCRAPING_FAILURE = 0.05  # if more than 10% of pages fail, raise error
+    LIMIT_SCRAPING_FAILURE = 0.05  # if more than 5% of pages fail, raise error
 
     def __init__(
         self,
@@ -197,13 +197,16 @@ class MySpider(object):
     ):
         self.quit_when_finished = quit_when_finished
         self.ignore_errors_when_parsing_info_page = ignore_errors_when_parsing_info_page
-        my_firefox_profile = get_firefox_profile_path(my_firefox_profile)
-        logger.info(f"Using profile: {my_firefox_profile}")
-        # firefox settings
-        options = Options()
-        options.headless = headless
-        self.profile = webdriver.FirefoxProfile(my_firefox_profile)
-        # directory for the geckodriver log
+        #####################
+        ## Firefox options ##
+        #####################
+        options = webdriver.FirefoxOptions()
+        #allow prompting for geo-location
+        options.set_preference("geo.prompt.testing", True)
+        #automatically deny requests for geo-location
+        options.set_preference("geo.prompt.testing.allow", False)
+        options.headless = headless #run headless or not?
+        #location for the selenium geckodriver log
         geckodriver_log_directory = Path(geckodriver_log_directory)
         if not geckodriver_log_directory.exists():
             logger.critical(
@@ -211,13 +214,22 @@ class MySpider(object):
             )
             sys.exit(1)
         slp = Path.joinpath(geckodriver_log_directory, "geckodriver.log")
-        self.driver = webdriver.Firefox(
-            self.profile, options=options, service_log_path=slp
-        )
+        #####################################################################
+        #the driver object is then queried to start Firefox and scrape pages
+        ######################################################################
+        self.driver = webdriver.Firefox(options=options, service_log_path=slp)
         # set large window size
         self.driver.set_window_position(0, 0)
         self.driver.set_window_size(1920, 1080)
-        # caching
+
+        # implicit wait
+        # ie each time we request a page element
+        # firefox waits up to 60 seconds until it shows up
+        self.driver.implicitly_wait(60)
+
+        #############
+        ## caching ##
+        #############
         self.cache_parent_directory = Path(cache_parent_directory)
         cache_dir = Path.joinpath(
             self.cache_parent_directory, Path(f"{datetime.now().strftime('%G-%m-%d')}")
@@ -230,12 +242,6 @@ class MySpider(object):
         self.geo_cache = JSONShelve(
             str(Path.joinpath(self.cache_parent_directory, "geocache.json"))
         )
-        # self.cache = shelve.open(
-        #     str(Path.joinpath(cache_dir, Path(f"{self.__class__.__name__}.pickle")))
-        # )
-        # self.geo_cache = shelve.open(
-        #     str(Path.joinpath(self.cache_parent_directory, "geocache.pickle"))
-        # )
         if not (Path(config_path).exists() and Path(config_path).is_file()):
             logger.critical(f"Could not find config file '{config_path}'. Quitting.")
             sys.exit(1)
@@ -246,6 +252,8 @@ class MySpider(object):
         self.export_cache_directory = export_cache_to_directory
 
     def address_to_long_lat(self, address_string):
+        """Geo-location using MapQuests API
+        Checks if address is already in cache"""
         # check cache
         # if not cache
         try:
@@ -272,7 +280,7 @@ class MySpider(object):
             else:
                 return None
 
-    def get_url(self, url, wait_condition=False):
+    def get_url(self, url, wait_condition=False, extra_paus=0):
         """Overwritten when we need a specific algorithm for
         retrieving the page"""
         self.driver.get(url)  # wait condition efter get?
@@ -280,7 +288,7 @@ class MySpider(object):
         # before returning the whole page
         if wait_condition:
             try:
-                WebDriverWait(self.driver, timeout=15).until(wait_condition)
+                WebDriverWait(self.driver, timeout=60).until(wait_condition)
             except TimeoutException:
                 # Waited for an element that never showed up
                 logger.error(
@@ -288,10 +296,13 @@ class MySpider(object):
                 )
                 logger.error(f"Could not retrieve {url}")
                 return False, None
+        time.sleep(extra_paus)
         page_source = self.driver.page_source
         return True, page_source
 
-    def make_soup(self, url, parser="lxml", wait_condition=False, soup_cache=None):
+    def make_soup(
+        self, url, parser="lxml", wait_condition=False, soup_cache=None, pause=0
+    ):
         # soup_cache != None when Hjärtat's sitemap is unavaiable
         # and we need to read from a previous sitemap
         # TODO: add timestamp to each entry in the cache
@@ -314,7 +325,9 @@ class MySpider(object):
                 logger.info(f"Web page from cache: {url}")
             except KeyError:
                 # url not in cache
-                got_source, page_source = self.get_url(url, wait_condition)
+                got_source, page_source = self.get_url(
+                    url, wait_condition, extra_paus=pause
+                )
                 # add page source to cache
                 if got_source:
                     logger.info(f"Web page from net: {url}")
@@ -340,12 +353,12 @@ class MySpider(object):
         if not output.is_dir():
             output.mkdir(parents=True)
         for key in self.cache:
-            if ".xml" in key:
+            if (".xml" in key) or ("hjartat_store_list") in key:
                 # The cached page is a sitemap. Do not export
                 pass
             else:
                 try:
-                    soup = BeautifulSoup(self.cache[key])
+                    soup = BeautifulSoup(self.cache[key], features="lxml")
                     file_name = self.get_current_store_name(soup) + ".txt"
                     path = Path.joinpath(output, file_name)
                     with open(path, "w") as page:
@@ -705,7 +718,7 @@ class KronansApotekSpider(MySpider):
         store_name = soup.select_one(store_name_selector).string
         return store_name
 
-    def get_url(self, url, wait_condition=False):
+    def get_url(self, url, wait_condition=False, extra_paus=0):
         """
         This function overwrites a function in the parent
         class that is called by the make_soup(url) function.
@@ -869,90 +882,81 @@ class KronansApotekSpider(MySpider):
 
 class HjartatSpider(MySpider):
 
-    START_URLS = ["https://www.apotekhjartat.se/sitemapindex.xml"]
-    url_regex = re.compile(
-        "https://www\.apotekhjartat\.se/hitta-apotek-hjartat/\w+/apotek_hjartat_.+/"
-    )
+    START_URLS = [
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/blekinge/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/dalarna/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/gotland/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/gavleborg/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/halland/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/jamtland/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/jonkoping/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/kalmar/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/kronoberg/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/norrbotten/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/skane/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/stockholm/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/sodermanland/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/umea/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/uppsala/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/varmland/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/vasterbotten/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/vasternorrland/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/vastmanland/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/vastra-gotaland/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/angermanland/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/orebro/?p=100",
+        "https://www.apotekhjartat.se/hitta-apotek-hjartat/ostergotland/?p=100",
+    ]
+    # url_regex = re.compile(
+    #     "https://www\.apotekhjartat\.se/hitta-apotek-hjartat/\w+/apotek_hjartat_.+/"
+    # )
 
-    def get_info_page_urls(self, starting_url):
-        """Trawls the sitemap for urls that link to individual store pages"""
-        logger.debug("Kronans Apotek: Hämtar sitemap")
-        # Apoteket Hjartat seems to have temporary blacklist
-        # If you hit any of the sitemap files more than X times per day
-        # you will get a 404.
-        # Also,their sitemap is not valid xml. Parsing it as html
-        new_page, main_sitemap = self.make_soup(starting_url, parser="lxml-xml")
-        # Since we never hit the starting url twice,
-        # we don't need to check variable "new_page"
-        prev_sitemap_cache = shelve.open(
-            str(Path.joinpath(self.cache_parent_directory, "hjartat_sitemap.pickle"))
-        )
-        locs = main_sitemap.find_all("loc")
-        if not locs:
-            # We hit their temporary blacklist and accessed
-            # their 404 page.
-            # Instead we read the last good instance of the sitemap.
-            # "cache/hjartat_sitemap.pickle" can be created with
-            # the tool misc/extract_hjartat_sitemap_from_cache.py
-            # logger.debug(f"{soup.title}")
-            logger.error(f"Could not retrieve Hjärtat's sitemap. Using old sitemap")
-            new_page, soup = self.make_soup(
-                starting_url, parser="lxml-xml", soup_cache=prev_sitemap_cache
-            )
-            locs = soup.find_all("loc")
-            if not locs:
-                raise ScrapeFailure(
-                    f"Could not retrieve Hjärtat's first sitemap from old sitemap"
+    def get_info_page_urls(self, start_url):
+        # todo: pröva 3 ggr, sedan ge upp
+        # todo: lägg till cache?
+        try:
+            # test if list of stores is already in the cache file
+            hits_found = self.cache["hjartat_store_list"][start_url]
+            logger.info(f"Hjartat store list from cache: {start_url}")
+        except KeyError:
+            # list not in cache
+            self.driver.get(start_url)
+
+            def wanted_elements(driver):
+                """All links in the search result box"""
+                return driver.find_element_by_class_name(
+                    "findPharmacyContentHolderInfo"
+                ).find_elements_by_tag_name("a")
+
+            try:
+                WebDriverWait(self.driver, timeout=60).until(wanted_elements)
+            except TimeoutException:
+                # Waited for an element that never showed up
+                logger.error(
+                    f"TimeoutException: The search result we waited for never showed up in {start_url}"
                 )
-            ####################################################
-            # Now we have retrieved the first sitemap,
-            # fresh from the web, from this weeks cache or
-            # from a previous week
-            ###################################################
-            # Now we retrieve the sub-sitemap that has links
-            # to each individual store's webpage
-            ###################################################
-            sub_sitemap_url = locs[0].text
-            print(sub_sitemap_url)
-            new_page, stores_sitemap = self.make_soup(
-                sub_sitemap_url, parser="lxml", soup_cache=prev_sitemap_cache
-            )
-        else:
-            # Current sitemap is good, save it to "cache/hjartat_sitemap.pickle"
-            prev_sitemap_cache[starting_url] = main_sitemap
-            prev_sitemap_cache.sync()
-            ####################################################
-            # Now we have retrieved the first sitemap,
-            # fresh from the web, from this weeks cache or
-            # from a previous week
-            ###################################################
-            # Now we retrieve the sub-sitemap that has links
-            # to each individual store's webpage
-            ###################################################
-            sub_sitemap_url = locs[0].text
-            new_page, stores_sitemap = self.make_soup(sub_sitemap_url, parser="lxml")
-            # We then copy this weeks sub-sitemap
-            # from our regular cache to our extra cache.
-            prev_sitemap_cache[starting_url] = self.cache[starting_url]
-            prev_sitemap_cache[sub_sitemap_url] = self.cache[sub_sitemap_url]
-            prev_sitemap_cache.sync()
-        # logger.debug(stores_sitemap)
-        ###############################################
-        # Finally, we find and return all store pages #
-        ###############################################
-        no_search_hits = 0
-        store_list = stores_sitemap.select("loc")
-        for loc in store_list:
-            store_url = loc.text
-            if "/hitta-apotek-hjartat/" in store_url:
-                url_split = store_url.split("/")
-                if len(url_split) >= 7:
-                    yield loc.text
-                    no_search_hits += 1
-        if no_search_hits == 0:
-            raise ScrapeFailure(f"Could not find any of Apoteket Hjärtat's stores")
-        prev_sitemap_cache.sync()
-        logger.info(f"Hjärtat: Found {no_search_hits} url candidates")
+            store_links = wanted_elements(self.driver)
+            logger.info(f"Hjärtat: Looking for correct links in {start_url}")
+            hits_found = []
+            for item in store_links:
+                # we have to store the urls first otherwise the
+                # links to the found elements expires when Firefox goes
+                # to the next page
+                url = item.get_property("href")
+                if "hitta-apotek-hjarta" in url:
+                    if len(url.split("/")) >= 7:
+                        hits_found.append(url)
+            if "hjartat_store_list" not in self.cache:
+                self.cache["hjartat_store_list"] = {}
+            self.cache["hjartat_store_list"][start_url] = hits_found
+            self.cache.sync()
+        finally:
+            if not hits_found:
+                logger.critical(f"Hjärtat: Could not find any stores in {start_url}")
+            else:
+                hits_found = set(hits_found)
+                for hit in hits_found:
+                    yield hit
 
     def get_info_page(self, url):
         """Retrieves the store's opening hours and street address"""
@@ -1159,9 +1163,9 @@ if __name__ == "__main__":
     elif arguments["APOTEK"] in all_modules:
         pharmacies = [arguments["APOTEK"]]
     else:
-        valid_chains = ", ".join(list(all_modules.keys()))
+        valid_pharmacy_names = ", ".join(list(all_modules.keys()))
         logger.critical(
-            f'"{arguments["APOTEK"]}" is not a valid Pharmacy Chain. Choose "{valid_chains}" or "ALLA"'
+            f'"{arguments["APOTEK"]}" is not a valid Pharmacy Chain. Choose "{valid_pharmacy_names}" or "ALLA"'
         )
         sys.exit(1)
 

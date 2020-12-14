@@ -1,11 +1,12 @@
 #!/usr/bin/env sh
 ./skrapa.py \
 --config='.secrets' \
+--profile='../selenium-profile' \
 --output='../output' \
---cache='../cache' \
---profile='../firefox-profile' \
 --headless \
+--cache='../cache' \
 --export-cache='../exported_pages' \
 --suppress-errors \
 $1
 
+#--headless \
