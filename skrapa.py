@@ -10,7 +10,6 @@ Usage:
 Options:
     -h,--help                             Show this screen.
     --config=<config>                     Path to config file [default: .secrets]
-    --profile=<profile>                   Path to Firefox profile
     --output=<dir>                        Output directory [default: output]
     --cache=<dir>                         Cache directory [default: cache]
     --headless                            Run Firefox headless
@@ -151,26 +150,6 @@ def test_separate_zip_from_city():
         assert c == city
 
 
-def get_firefox_profile_path(my_firefox_profile=None):
-    if not my_firefox_profile:
-        system = platform.system()
-        if system == "Linux":
-            my_firefox_profile = "~/.mozilla/firefox/"
-
-        else:
-            raise NotImplementedError(
-                "Your system is not supported. Please see https://tinyurl.com/y4uey2eo"
-            )
-    profile_home = Path(my_firefox_profile).expanduser()
-    # try:
-    #     profile_path = list(profile_home.glob("*.default*"))[0]
-    # except IndexError:
-    #     raise FileNotFoundError(
-    #         f"Could not find path to FireFox profile: '{profile_home}'"
-    #     )
-    return profile_home  # profile_path
-
-
 class ScrapeFailure(Exception):
     def __init__(self, message):
         super().__init__(message)
@@ -189,7 +168,6 @@ class MySpider(object):
         cache_parent_directory,
         config_path,  # tidigare .secrets
         geckodriver_log_directory,
-        my_firefox_profile=None,
         quit_when_finished=True,
         headless=False,
         ignore_errors_when_parsing_info_page=False,
@@ -1114,8 +1092,6 @@ class SOAFSpider(MySpider):
 
 
 if __name__ == "__main__":
-    # options: firefox profile, output directory, headless,
-    # arguments: pharmacy
     arguments = docopt(__doc__, version="skrapa 0.2")
     # create output directory if needed
     if not arguments["--output"]:
@@ -1175,7 +1151,6 @@ if __name__ == "__main__":
             cache_parent_directory=arguments["--cache"],
             config_path=arguments["--config"],
             geckodriver_log_directory=output_parent_directory,
-            my_firefox_profile=arguments["--profile"],
             headless=arguments["--headless"],
             quit_when_finished=not arguments["--keep-open"],  # False -> True
             ignore_errors_when_parsing_info_page=arguments["--suppress-errors"],
