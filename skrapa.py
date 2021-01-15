@@ -32,12 +32,29 @@ Description:
 
     Then, you need to start Firefox and set it to block location requests.
 """
+####################################
+### How to understand this code: ###
+### When we run this script from the command line
+### The code beneath the "if __name__==__main__"
+### condtion is run
+### The command line options are parsed from the example in
+### the docstring above.
+### When parsing a particular pharmacy chain we create a
+### instance of the XXXSpider class. For example "ApoteksgruppenSpider"
+### The XXXSpider is a child class to MySpider class.
+### The class instance holds information about which pages to visit,
+### which pages are in the cache, which pages we have already visited
+### during the current session, etc.
+### The class instance starts a instance of FireFox and starts crawling
+### When finished the FireFox instance is quit.
+#############################
+
+
 
 from docopt import docopt
 import sys
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.firefox.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -48,9 +65,7 @@ import time
 from datetime import datetime
 import petl as etl
 import re
-import shelve
 import requests
-import platform
 import configparser
 from pathlib import Path
 from loguru import logger
@@ -93,14 +108,17 @@ def weekday_text_to_int(txt, weekdaynow=None):
         return None
     txt = txt.lower().strip()
     if "idag" in txt:
+        #today
         return f"{weekdaynow}"
     elif "imorgon" in txt:
+        #tomorrow is a monday
         if weekdaynow == 7:
             return "1"
         else:
+            #tomorrow is between tuesday and sunday
             return f"{weekdaynow + 1}"
     else:
-        txt, *_ = txt.split()  # Måndag (bla bla)
+        txt, *_ = txt.split()  #e.g. Måndag (bla bla)
         if txt in WEEKDAYS:
             return WEEKDAYS[txt]
         else:
@@ -152,6 +170,9 @@ def test_separate_zip_from_city():
 
 
 class ScrapeFailure(Exception):
+    """My custom python exception.
+    Raised when we fail to retrieve data from a page or
+    the page does not load"""
     def __init__(self, message):
         super().__init__(message)
 
@@ -167,7 +188,7 @@ class MySpider(object):
     def __init__(
         self,
         cache_parent_directory,
-        config_path,  # tidigare .secrets
+        config_path,  # previously .secrets
         geckodriver_log_directory,
         quit_when_finished=True,
         headless=False,
@@ -204,6 +225,9 @@ class MySpider(object):
         # implicit wait
         # ie each time we request a page element
         # firefox waits up to 60 seconds until it shows up
+        # I believe this overridden when we set the
+        # "timeout" option to the WebDriverWait function
+        # se my "get_url" class function
         self.driver.implicitly_wait(60)
 
         #############
@@ -260,7 +284,10 @@ class MySpider(object):
                 return None
 
     def get_url(self, url, wait_condition=False, pause=60):
-        """Overwritten when we need a specific algorithm for
+        """Retrieves a particular url using FireFox. Returns the
+        page source. Waits until the "wait_condition" function
+        returns True.
+        get_url is overwritten when we need a specific algorithm for
         retrieving the page"""
         self.driver.get(url)  # wait condition efter get?
         # waiting for a particular element of the page to load
@@ -281,8 +308,11 @@ class MySpider(object):
     def make_soup(
         self, url, parser="lxml", wait_condition=False, soup_cache=None, pause=60
     ):
-        # soup_cache != None when Hjärtat's sitemap is unavaiable
-        # and we need to read from a previous sitemap
+        """This function retrieves the page source from a webpage.
+        The function first tests if the page is in the cache.
+            * wait_condition is a lambda function that returns true if a page element is finished loading
+            * pause give us the no seconds to wait for wait_condition to turn true.
+            * soup_cache makes it possible to use a custom cache object"""
         # TODO: add timestamp to each entry in the cache
         if not soup_cache:
             # soup_cache not set
@@ -323,9 +353,13 @@ class MySpider(object):
             return True, BeautifulSoup(page_source, parser)
 
     def get_current_store_name(self, soup):
+        """Simply returns the name of the store from the
+        web page title.
+        Can be overridden by child classes to MySpider"""
         return soup.title.text
 
     def export_cache(self, export_cache_directory):
+        """Exports the web pages in the the cache to separate text files"""
         subdirectory = Path(datetime.now().strftime("%G-%m-%d"))
         output = Path.joinpath(Path(export_cache_directory), subdirectory)
         if not output.is_dir():
@@ -352,28 +386,39 @@ class MySpider(object):
         self.geo_cache.sync()
 
     @logger.catch()
+    #catches errors to the log
     def write_xlsx(self, path):
+        """This functions kicks off the whole
+        process for scraping the pages from a store."""
         result = self.scrape()
         table = etl.fromdicts(result)
         etl.toxlsx(table, path)
         logger.info(f"Wrote result to {path}")
 
     def get_info_page_urls(self, start_url):
+        """ Creates an iterator of all the individual store pages
+        Overwritten by the child classes to MySpider"""
         pass
 
     def get_info_page(self, info_page_url):
+        """ Creates an iterator of all the
+        opening hour rows from a specific store info page
+        Overwritten by the child classes to MySpider"""
         pass
 
-    def save_urls_to_cache(self):
-        urls = []
-        for start_url in self.START_URLS:
-            for info_page_url in self.get_info_page_urls(start_url):
-                urls.append(info_page_url)
-        self.cache["all_urls"] = urls
-        self.write_cache()
-        # todo write to xlsx in output directory?
+    # def save_urls_to_cache(self):
+    #     urls = []
+    #     for start_url in self.START_URLS:
+    #         for info_page_url in self.get_info_page_urls(start_url):
+    #             urls.append(info_page_url)
+    #     self.cache["all_urls"] = urls
+    #     self.write_cache()
 
     def scrape(self):
+        """The heart of the scraping algorithm.
+        Loops over the START_URLS and runs get_info_page_urls on
+        each item.
+        """
         for start_url in self.START_URLS:
             for info_page_url in self.get_info_page_urls(start_url):
                 # Catches exceptions when parsing individual store pages
@@ -497,10 +542,8 @@ class ApoteksgruppenSpider(MySpider):
 
 
 class ApoteketSpider(MySpider):
-
+    #Apotekets sitemap
     START_URLS = ["https://www.apoteket.se/sitemap.xml"]
-    url_regex = re.compile(r"(https://www.apoteket.se/apotek/(\w+-){2,3}\w+/)")
-    # https://www.apoteket.se/apotek/apoteket-ekorren-goteborg/
 
     def get_info_page_urls(self, starting_url):
         """Trawls the sitemap for urls that link to individual store pages"""
@@ -512,6 +555,7 @@ class ApoteketSpider(MySpider):
             store_url = loc.text
             store_url_parts = store_url.split("/")
             if len(store_url_parts) >= 4:
+                #e.g https://www.apoteket.se/apotek/apoteket-ekorren-goteborg/
                 http, _, domain, subcat, *remainder = store_url_parts
                 if subcat == "apotek" and len(remainder) > 1:
                     if "-lan/" not in store_url and "/ombud" not in store_url:
@@ -1093,10 +1137,10 @@ class SOAFSpider(MySpider):
 
 
 if __name__ == "__main__":
-    # options: firefox profile, output directory, headless,
-    # arguments: pharmacy
+    #arguments are the command line arguments and options
+    #extracted using the docopt module
+    #See http://docopt.org/
     arguments = docopt(__doc__, version="skrapa 0.2")
-    # create output directory if needed
     if not arguments["--output"]:
         output_parent_directory = Path("output")
         output_directory = Path.joinpath(
@@ -1108,10 +1152,12 @@ if __name__ == "__main__":
             output_parent_directory, Path(f"{datetime.now().strftime('%G-%m-%d')}")
         )
     if not output_directory.is_dir():
+        # create output directory if needed
         output_directory.mkdir(parents=True)
 
-    # logging
-
+    #####################################
+    ## logging using the loguru module ##
+    #####################################
     logger.add(
         Path.joinpath(output_parent_directory, "skrapa.error.log"),
         rotation="4h",
@@ -1125,8 +1171,10 @@ if __name__ == "__main__":
         retention="6 week",
         level="INFO",
     )
-    # logger.debug(arguments)
 
+    #################################
+    ### Now we start the scraping ###
+    #################################
     # case-then-switch for which module to run
     all_modules = {
         "apoteksgruppen": ApoteksgruppenSpider,
@@ -1168,6 +1216,10 @@ if __name__ == "__main__":
 
         curr_module.write_xlsx(path_to_xlsx_file)
     logger.info(f"Finished scraping: {', '.join(pharmacies)}")
+
+    ###############################################
+    ### Optional post-scraping functions to run  ##
+    ###############################################
     if arguments["--exec"]:
         # e.g ./misc/send_output_files_with_email.py output/2020-W20
         if arguments["--export-cache"]:

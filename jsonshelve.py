@@ -5,7 +5,8 @@ from collections import UserDict
 
 class JSONShelve(UserDict):
     """Implements a shelf-like class based on
-    json serialization
+    json serialization. Ie saves a dictionary to
+    disc as a json object.
 
         >>> f = Foo("path_to_file.json")
         >>> f["hello"]="world"
