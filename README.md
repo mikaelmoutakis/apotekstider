@@ -17,7 +17,6 @@ A set of python scripts for scraping the opening hours off the Swedish pharmacy 
         --exec=<cmd>                          Executes <cmd>+cache+output, e.g. 'foo {} {}', afterwards.
         --keep-open                           Keeps FireFox open after scraping
         --export-cache=<dir>                  Exports the cache to separate text files in <dir>
-        --save-sitemap                        Saves the store URLs to the cache.
 
 ## Requirements
 
@@ -61,11 +60,11 @@ The content should look like this:
 ### Usage
 To scrape the pages for Apoteket AB and save the result to a Microsoft Excel document run:
 
-    ./skrapa apoteket
+    ./skrapa.py apoteket
 
 The file is saved in the "output" directory. If you want to save the file to another directory, run
 
-    ./skrapa --output-directory="/path/to/directory" apoteket
+    ./skrapa.py --output-directory="/path/to/directory" apoteket
 
 To see your other options run:
 

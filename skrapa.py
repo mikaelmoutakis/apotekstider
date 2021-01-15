@@ -17,7 +17,6 @@ Options:
     --exec=<cmd>                          Executes <cmd>+cache+output, e.g. 'foo {} {}', afterwards.
     --keep-open                           Keeps FireFox open after scraping
     --export-cache=<dir>                  Exports the cache to separate text files in <dir>
-    --save-sitemap                        Saves the store URLs to the cache.
 
 Description:
     A set of scripts for retrieving opening hours from all the major pharmacy chains in Sweden.
@@ -260,7 +259,7 @@ class MySpider(object):
             else:
                 return None
 
-    def get_url(self, url, wait_condition=False, extra_paus=0):
+    def get_url(self, url, wait_condition=False, pause=60):
         """Overwritten when we need a specific algorithm for
         retrieving the page"""
         self.driver.get(url)  # wait condition efter get?
@@ -268,7 +267,7 @@ class MySpider(object):
         # before returning the whole page
         if wait_condition:
             try:
-                WebDriverWait(self.driver, timeout=60).until(wait_condition)
+                WebDriverWait(self.driver, timeout=pause).until(wait_condition)
             except TimeoutException:
                 # Waited for an element that never showed up
                 logger.error(
@@ -276,12 +275,11 @@ class MySpider(object):
                 )
                 logger.error(f"Could not retrieve {url}")
                 return False, None
-        time.sleep(extra_paus)
         page_source = self.driver.page_source
         return True, page_source
 
     def make_soup(
-        self, url, parser="lxml", wait_condition=False, soup_cache=None, pause=0
+        self, url, parser="lxml", wait_condition=False, soup_cache=None, pause=60
     ):
         # soup_cache != None when Hjärtat's sitemap is unavaiable
         # and we need to read from a previous sitemap
@@ -306,7 +304,7 @@ class MySpider(object):
             except KeyError:
                 # url not in cache
                 got_source, page_source = self.get_url(
-                    url, wait_condition, extra_paus=pause
+                    url, wait_condition, pause=pause
                 )
                 # add page source to cache
                 if got_source:
@@ -698,7 +696,7 @@ class KronansApotekSpider(MySpider):
         store_name = soup.select_one(store_name_selector).string
         return store_name
 
-    def get_url(self, url, wait_condition=False, extra_paus=0):
+    def get_url(self, url, wait_condition=False, pause=60):
         """
         This function overwrites a function in the parent
         class that is called by the make_soup(url) function.
@@ -710,7 +708,7 @@ class KronansApotekSpider(MySpider):
         if ".xml" in url:
             # The url is a sitemap
             # We just downloading it using the standard function
-            return super().get_url(url, wait_condition)
+            return super().get_url(url, wait_condition,pause=pause)
         else:
             # Url is not a sitemap
             # We find the store page by searching for it
@@ -725,7 +723,7 @@ class KronansApotekSpider(MySpider):
             self.driver.get(search_page_url)
             try:
                 # We wait for the search field to show up
-                element = WebDriverWait(self.driver, 60).until(
+                element = WebDriverWait(self.driver, pause).until(
                     EC.presence_of_element_located((By.ID, search_field_locator))
                 )
             except TimeoutException:
@@ -909,7 +907,7 @@ class HjartatSpider(MySpider):
                 ).find_elements_by_tag_name("a")
 
             try:
-                WebDriverWait(self.driver, timeout=60).until(wanted_elements)
+                WebDriverWait(self.driver, timeout=180).until(wanted_elements)
             except TimeoutException:
                 # Waited for an element that never showed up
                 logger.error(
@@ -946,6 +944,7 @@ class HjartatSpider(MySpider):
             wait_condition=lambda d: d.find_element_by_css_selector(
                 detail_pane_selector
             ),
+            pause=240
         )
         if new_page:
             info_box = soup.find(id="findPharmacyContentHolder2")
@@ -1166,13 +1165,8 @@ if __name__ == "__main__":
                 f"{current_pharmacy}_{datetime.now().isoformat().replace(':', '_')}.xlsx",
             )
         )
-        if arguments["--save-sitemap"]:
-            # save only the list of store urls to the cache file
-            # don't scrape the opening hours
-            curr_module.save_urls_to_cache()
-        else:
-            # scrape the opening hours
-            curr_module.write_xlsx(path_to_xlsx_file)
+
+        curr_module.write_xlsx(path_to_xlsx_file)
     logger.info(f"Finished scraping: {', '.join(pharmacies)}")
     if arguments["--exec"]:
         # e.g ./misc/send_output_files_with_email.py output/2020-W20
